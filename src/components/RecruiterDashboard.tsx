@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Filter, Star, Download, Eye, CheckCircle, X, Users, FileText, TrendingUp } from 'lucide-react';
 import { Application, Student } from '../types';
+import { useAuthStore } from '../store/authStore';
+import { dashboardService, applicationsService, companiesService } from '../services';
 
 const RecruiterDashboard: React.FC = () => {
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'applications' | 'rounds' | 'analytics'>('applications');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCriteria, setFilterCriteria] = useState({
@@ -11,72 +14,50 @@ const RecruiterDashboard: React.FC = () => {
     status: 'all',
   });
   const [selectedApplications, setSelectedApplications] = useState<string[]>([]);
+  const [applications, setApplications] = useState<any[]>([]);
+  const [stats, setStats] = useState({
+    totalApplications: 0,
+    underReview: 0,
+    shortlisted: 0,
+    avgScore: 0,
+  });
+  const [loading, setLoading] = useState(true);
 
-  // Mock applications data
-  const mockApplications: (Application & { student: Student })[] = [
-    {
-      id: '1',
-      studentId: '1',
-      companyId: '1',
-      status: 'submitted',
-      submittedAt: '2025-01-20T10:30:00Z',
-      score: 85,
-      formData: {
-        studentName: 'Arjun Sharma',
-        rollNumber: '21BCE101',
-        email: 'arjun.sharma@college.edu',
-        phone: '+91 98765 43210',
-        branch: 'Computer Science',
-        cgpa: 9.2,
-        skills: 'React, Node.js, Python, MongoDB',
-        experience: '2 internships, 3 projects',
-        whyCompany: 'Passionate about fintech innovation...',
-        resume: null,
-      },
-      student: {
-        id: '1',
-        name: 'Arjun Sharma',
-        rollNumber: '21BCE101',
-        branch: 'Computer Science',
-        email: 'arjun.sharma@college.edu',
-        cgpa: 9.2,
-        phone: '+91 98765 43210',
-        skills: ['React', 'Node.js', 'Python', 'MongoDB'],
-      },
-    },
-    {
-      id: '2',
-      studentId: '2',
-      companyId: '1',
-      status: 'under-review',
-      submittedAt: '2025-01-19T14:15:00Z',
-      score: 92,
-      formData: {
-        studentName: 'Priya Patel',
-        rollNumber: '21BCE102',
-        email: 'priya.patel@college.edu',
-        phone: '+91 98765 43211',
-        branch: 'Computer Science',
-        cgpa: 9.5,
-        skills: 'Java, Spring Boot, MySQL, AWS',
-        experience: '1 internship, 5 projects',
-        whyCompany: 'Excited about payment technology...',
-        resume: null,
-      },
-      student: {
-        id: '2',
-        name: 'Priya Patel',
-        rollNumber: '21BCE102',
-        branch: 'Computer Science',
-        email: 'priya.patel@college.edu',
-        cgpa: 9.5,
-        phone: '+91 98765 43211',
-        skills: ['Java', 'Spring Boot', 'MySQL', 'AWS'],
-      },
-    },
-  ];
+  useEffect(() => {
+    if (user?.companyId) {
+      fetchDashboardData();
+    }
+  }, [user]);
 
-  const filteredApplications = mockApplications.filter(app => {
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch recruiter dashboard data
+      const dashboardResponse = await dashboardService.getRecruiterDashboard(user!.companyId!);
+      if (dashboardResponse.success && dashboardResponse.data) {
+        const dashboardStats = dashboardResponse.data.stats;
+        setStats({
+          totalApplications: dashboardStats.totalApplications || 0,
+          underReview: dashboardStats.applicationsInReview || 0,
+          shortlisted: dashboardStats.shortlistedApplications || 0,
+          avgScore: dashboardStats.averageScore || 0,
+        });
+      }
+
+      // Fetch company applications
+      const appsResponse = await applicationsService.getCompanyApplications(user!.companyId!);
+      if (appsResponse.success && appsResponse.data) {
+        setApplications(appsResponse.data);
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredApplications = applications.filter(app => {
     const matchesSearch = app.student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          app.student.rollNumber.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesBranch = filterCriteria.branch === 'all' || app.student.branch === filterCriteria.branch;
@@ -88,23 +69,45 @@ const RecruiterDashboard: React.FC = () => {
     return matchesSearch && matchesBranch && matchesCGPA && matchesStatus;
   });
 
-  const handleScoreChange = (applicationId: string, score: number) => {
-    console.log(`Updating score for application ${applicationId}: ${score}`);
+  const handleScoreChange = async (applicationId: string, score: number) => {
+    try {
+      await applicationsService.updateApplicationScore(applicationId, { score });
+      // Refresh data after update
+      fetchDashboardData();
+    } catch (error) {
+      console.error('Error updating score:', error);
+    }
   };
 
-  const handleStatusChange = (applicationId: string, status: string) => {
-    console.log(`Updating status for application ${applicationId}: ${status}`);
+  const handleStatusChange = async (applicationId: string, status: string) => {
+    try {
+      await applicationsService.updateApplicationStatus(applicationId, { status });
+      // Refresh data after update
+      fetchDashboardData();
+    } catch (error) {
+      console.error('Error updating status:', error);
+    }
   };
 
-  const handleBulkAction = (action: string) => {
-    console.log(`Bulk action ${action} for applications:`, selectedApplications);
-  };
-
-  const stats = {
-    totalApplications: mockApplications.length,
-    underReview: mockApplications.filter(app => app.status === 'under-review').length,
-    shortlisted: mockApplications.filter(app => app.status === 'shortlisted').length,
-    avgScore: mockApplications.reduce((sum, app) => sum + (app.score || 0), 0) / mockApplications.length,
+  const handleBulkAction = async (action: string) => {
+    try {
+      if (action === 'shortlist') {
+        await applicationsService.bulkUpdateApplications({
+          applicationIds: selectedApplications,
+          status: 'shortlisted',
+        });
+      } else if (action === 'reject') {
+        await applicationsService.bulkUpdateApplications({
+          applicationIds: selectedApplications,
+          status: 'rejected',
+        });
+      }
+      // Refresh data and clear selection
+      fetchDashboardData();
+      setSelectedApplications([]);
+    } catch (error) {
+      console.error('Error performing bulk action:', error);
+    }
   };
 
   return (

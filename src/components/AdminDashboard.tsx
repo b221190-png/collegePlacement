@@ -1,18 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Upload, Users, Building2, Calendar, Settings, FileText, Download } from 'lucide-react';
 import CompanyOnboardingForm from './CompanyOnboardingForm';
 import StudentBulkUpload from './StudentBulkUpload';
 import ApplicationWindow from './ApplicationWindow';
+import { dashboardService, companiesService } from '../services';
 
 const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'companies' | 'students' | 'applications'>('overview');
+  const [stats, setStats] = useState({
+    totalCompanies: 0,
+    activeRecruitments: 0,
+    totalStudents: 0,
+    totalApplications: 0,
+    pendingApprovals: 0,
+  });
+  const [loading, setLoading] = useState(true);
 
-  const stats = {
-    totalCompanies: 6,
-    activeRecruitments: 3,
-    totalStudents: 450,
-    totalApplications: 1250,
-    pendingApprovals: 2,
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      const response = await dashboardService.getAdminDashboard();
+      if (response.success && response.data) {
+        setStats({
+          totalCompanies: response.data.stats.totalCompanies || 0,
+          activeRecruitments: response.data.stats.activeCompanies || 0,
+          totalStudents: response.data.stats.totalStudents || 0,
+          totalApplications: response.data.stats.totalApplications || 0,
+          pendingApprovals: response.data.stats.pendingApplications || 0,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

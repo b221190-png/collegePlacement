@@ -1,120 +1,105 @@
-import React, { useState } from 'react';
-import Header from './components/Header';
-import Dashboard from './components/Dashboard';
-import MyApplications from './components/MyApplications';
-import OffCampusOpportunities from './components/OffCampusOpportunities';
-import CompanyDetails from './components/CompanyDetails';
-import ApplicationForm from './components/ApplicationForm';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthWrapper } from './components/auth/AuthWrapper';
+import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import { LayoutWithHeader } from './components/layout/LayoutWithHeader';
 import AdminDashboard from './components/AdminDashboard';
-import RecruiterDashboard from './components/RecruiterDashboard';
-import { Company, ApplicationForm as ApplicationFormType, User } from './types';
-
-type View = 'companies' | 'off-campus' | 'my-applications' | 'profile' | 'company-details' | 'application-form' | 'admin-dashboard' | 'recruiter-dashboard';
+import { StudentDashboard } from './components/dashboard/StudentDashboard';
+import { TestAuth } from './components/test/TestAuth';
+import { useAuthStore } from './store/authStore';
+import { initializeAuth } from './store/authStore';
 
 function App() {
-  const [currentView, setCurrentView] = useState<View>('companies');
-  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
-  
-  // Mock user - in real app this would come from authentication
-  const [currentUser] = useState<User>({
-    id: '1',
-    name: 'John Doe',
-    email: 'john.doe@college.edu',
-    role: 'admin', // Change to 'admin' or 'recruiter' to test different roles
-  });
+  const { user } = useAuthStore();
 
-  const handleCompanySelect = (company: Company) => {
-    setSelectedCompany(company);
-    setCurrentView('company-details');
-  };
+  useEffect(() => {
+    // Initialize authentication on app start
+    initializeAuth();
+  }, []);
 
-  const handleApplyClick = (company: Company) => {
-    setSelectedCompany(company);
-    setCurrentView('application-form');
-  };
-
-  const handleBackToDashboard = () => {
-    setCurrentView('companies');
-    setSelectedCompany(null);
-  };
-
-  const handleBackToCompanyDetails = () => {
-    setCurrentView('company-details');
-  };
-
-  const handleApplicationSubmit = (formData: ApplicationFormType) => {
-    // Here you would typically submit the form data to your backend
-    console.log('Application submitted:', formData);
-    alert('Application submitted successfully!');
-    setCurrentView('companies');
-    setSelectedCompany(null);
-  };
-
-  const handleViewChange = (view: string) => {
-    setCurrentView(view as View);
-    setSelectedCompany(null);
+  const handleAuthSuccess = () => {
+    // This will be handled by the ProtectedRoute component
+    // The user state will be updated in the store
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header 
-        currentView={currentView} 
-        onViewChange={handleViewChange}
-        userRole={currentUser.role}
-      />
-      
-      <main className="py-8">
-        {/* Student Views */}
-        {currentView === 'companies' && (
-          <Dashboard
-            onCompanySelect={handleCompanySelect}
-            onApplyClick={handleApplyClick}
+    <Router>
+      <div className="min-h-screen bg-gray-50">
+        <Routes>
+          {/* Authentication Route */}
+          <Route
+            path="/auth"
+            element={
+              <ProtectedRoute requireAuth={false}>
+                <AuthWrapper onSuccess={handleAuthSuccess} />
+              </ProtectedRoute>
+            }
           />
-        )}
 
-        {currentView === 'off-campus' && (
-          <OffCampusOpportunities />
-        )}
-
-        {currentView === 'my-applications' && (
-          <MyApplications />
-        )}
-
-        {currentView === 'profile' && (
-          <div className="max-w-4xl mx-auto p-6">
-            <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Profile</h2>
-              <p className="text-gray-600">Profile page coming soon...</p>
-            </div>
-          </div>
-        )}
-        
-        {currentView === 'company-details' && selectedCompany && (
-          <CompanyDetails
-            company={selectedCompany}
-            onBack={handleBackToDashboard}
+          {/* Admin Dashboard Route */}
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <LayoutWithHeader>
+                  <AdminDashboard />
+                </LayoutWithHeader>
+              </ProtectedRoute>
+            }
           />
-        )}
-        
-        {currentView === 'application-form' && selectedCompany && (
-          <ApplicationForm
-            company={selectedCompany}
-            onBack={handleBackToCompanyDetails}
-            onSubmit={handleApplicationSubmit}
+
+          {/* Student Dashboard Route */}
+          <Route
+            path="/student"
+            element={
+              <ProtectedRoute requiredRole="student">
+                <LayoutWithHeader>
+                  <StudentDashboard />
+                </LayoutWithHeader>
+              </ProtectedRoute>
+            }
           />
-        )}
 
-        {/* Admin Views */}
-        {currentView === 'admin-dashboard' && (
-          <AdminDashboard />
-        )}
+          {/* Recruiter Dashboard Route (placeholder for future) */}
+          <Route
+            path="/recruiter"
+            element={
+              <ProtectedRoute requiredRole="recruiter">
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                  <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-900 mb-4">Recruiter Dashboard</h1>
+                    <p className="text-gray-600">Coming soon...</p>
+                  </div>
+                </div>
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Recruiter Views */}
-        {currentView === 'recruiter-dashboard' && (
-          <RecruiterDashboard />
-        )}
-      </main>
-    </div>
+          {/* Root redirect */}
+          <Route
+            path="/"
+            element={
+              user ? (
+                <Navigate to={`/${user.role}`} replace />
+              ) : (
+                <Navigate to="/auth" replace />
+              )
+            }
+          />
+
+          {/* Test Route */}
+          <Route path="/test-auth" element={<TestAuth />} />
+
+          {/* Catch all route */}
+          <Route
+            path="*"
+            element={
+              <Navigate to={user ? `/${user.role}` : '/auth'} replace />
+            }
+          />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 
