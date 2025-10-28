@@ -46,7 +46,9 @@ const allowedOrigins = [
   'http://localhost:5174',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
-  process.env.PRODUCTION_FRONTEND_URL || 'https://your-frontend-domain.com'
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+  process.env.PRODUCTION_FRONTEND_URL || 'https://college-placement-omega.vercel.app'
 ];
 
 app.use(cors({
