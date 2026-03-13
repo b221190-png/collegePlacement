@@ -1,330 +1,754 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Upload, Users, Building2, Calendar, Settings, FileText, Download } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import {
+  Building2,
+  Calendar,
+  Download,
+  FileText,
+  GraduationCap,
+  LogOut,
+  Plus,
+  RotateCcw,
+  Upload,
+} from 'lucide-react';
 import CompanyOnboardingForm from './CompanyOnboardingForm';
 import StudentBulkUpload from './StudentBulkUpload';
 import ApplicationWindow from './ApplicationWindow';
-import { dashboardService, companiesService } from '../services';
+import { useAuthStore } from '../store/authStore';
+import {
+  ApplicationRecord,
+  CompanyRecord,
+  OffCampusRecord,
+  StudentRecord,
+  getAdminStats,
+  usePlacementStore,
+} from '../store/placementStore';
+
+type Tab = 'overview' | 'companies' | 'students' | 'applications' | 'offcampus';
 
 const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'companies' | 'students' | 'applications'>('overview');
-  const [stats, setStats] = useState({
-    totalCompanies: 0,
-    activeRecruitments: 0,
-    totalStudents: 0,
-    totalApplications: 0,
-    pendingApprovals: 0,
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
+  const companies = usePlacementStore((state) => state.companies);
+  const students = usePlacementStore((state) => state.students);
+  const applications = usePlacementStore((state) => state.applications);
+  const offCampusOpportunities = usePlacementStore(
+    (state) => state.offCampusOpportunities
+  );
+  const createCompany = usePlacementStore((state) => state.createCompany);
+  const configureApplicationWindow = usePlacementStore(
+    (state) => state.configureApplicationWindow
+  );
+  const bulkImportStudents = usePlacementStore((state) => state.bulkImportStudents);
+  const createOffCampusOpportunity = usePlacementStore(
+    (state) => state.createOffCampusOpportunity
+  );
+  const resetDemoData = usePlacementStore((state) => state.resetDemoData);
+
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [showCompanyForm, setShowCompanyForm] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [showWindowForm, setShowWindowForm] = useState(false);
+  const [showOpportunityForm, setShowOpportunityForm] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [recruiterCredentials, setRecruiterCredentials] = useState<{
+    email: string;
+    password: string;
+    name: string;
+  } | null>(null);
+  const [opportunityForm, setOpportunityForm] = useState({
+    title: '',
+    company: '',
+    location: '',
+    type: 'full-time',
+    description: '',
+    skills: '',
+    applicationDeadline: '',
+    salary: '',
+    applicationLink: 'https://example.com/apply',
+    industry: 'Technology',
+    experience: 'any',
+    isRemote: false,
   });
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  const stats = useMemo(
+    () =>
+      getAdminStats({
+        users: [],
+        students,
+        companies,
+        applications,
+        offCampusOpportunities,
+      }),
+    [applications, companies, offCampusOpportunities, students]
+  );
 
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      const response = await dashboardService.getAdminDashboard();
-      if (response.success && response.data) {
-        setStats({
-          totalCompanies: response.data.stats.totalCompanies || 0,
-          activeRecruitments: response.data.stats.activeCompanies || 0,
-          totalStudents: response.data.stats.totalStudents || 0,
-          totalApplications: response.data.stats.totalApplications || 0,
-          pendingApprovals: response.data.stats.pendingApplications || 0,
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
+  const applicationRows = useMemo(
+    () =>
+      applications.map((application) => ({
+        ...application,
+        student: students.find((student) => student.id === application.studentId) || null,
+        company: companies.find((company) => company.id === application.companyId) || null,
+      })),
+    [applications, companies, students]
+  );
+
+  const handleReset = () => {
+    resetDemoData();
+    setRecruiterCredentials(null);
+    setStatusMessage('Demo data reset to the original local seed.');
+  };
+
+  const handleExportStudents = () => {
+    const header = [
+      'Name',
+      'Roll Number',
+      'Email',
+      'Phone',
+      'Branch',
+      'CGPA',
+      'Batch',
+      'Skills',
+    ];
+    const rows = students.map((student) => [
+      student.name,
+      student.rollNumber,
+      student.email,
+      student.phone,
+      student.branch,
+      String(student.cgpa),
+      String(student.batch),
+      student.skills.join(' | '),
+    ]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((value) => `"${value}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'students-export.csv';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCreateOpportunity = async (event: React.FormEvent) => {
+    event.preventDefault();
+    createOffCampusOpportunity({
+      title: opportunityForm.title,
+      company: opportunityForm.company,
+      companyLogo:
+        'https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=100',
+      type: opportunityForm.type as OffCampusRecord['type'],
+      location: opportunityForm.location,
+      isRemote: opportunityForm.isRemote,
+      description: opportunityForm.description,
+      skills: opportunityForm.skills
+        .split(',')
+        .map((skill) => skill.trim())
+        .filter(Boolean),
+      requirements: opportunityForm.skills
+        .split(',')
+        .map((skill) => `Working knowledge of ${skill.trim()}`)
+        .filter((value) => value !== 'Working knowledge of '),
+      applicationDeadline: opportunityForm.applicationDeadline,
+      applicationLink: opportunityForm.applicationLink,
+      industry: opportunityForm.industry,
+      experience: opportunityForm.experience as OffCampusRecord['experience'],
+      salary: opportunityForm.salary || undefined,
+    }, user?.id);
+    setStatusMessage('Off-campus opportunity created successfully.');
+    setShowOpportunityForm(false);
+    setOpportunityForm({
+      title: '',
+      company: '',
+      location: '',
+      type: 'full-time',
+      description: '',
+      skills: '',
+      applicationDeadline: '',
+      salary: '',
+      applicationLink: 'https://example.com/apply',
+      industry: 'Technology',
+      experience: 'any',
+      isRemote: false,
+    });
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6">
-      <div className="mb-6 sm:mb-8">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Admin Dashboard</h1>
-        <p className="text-sm sm:text-base text-gray-600">Manage companies, students, and recruitment processes</p>
-      </div>
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-slate-950 text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <p className="text-sm uppercase tracking-[0.25em] text-sky-200/70">
+                Admin Workspace
+              </p>
+              <h1 className="text-3xl font-bold mt-2">College placement control room</h1>
+              <p className="text-slate-300 mt-2">
+                Create companies, import students, and manage placement operations.
+              </p>
+            </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-6 mb-6 sm:mb-8">
-        <div className="bg-white p-3 sm:p-4 md:p-6 rounded-lg border border-gray-200">
-          <div className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 mb-1 sm:mb-2">{stats.totalCompanies}</div>
-          <div className="text-xs sm:text-sm md:text-sm text-gray-600">Total Companies</div>
-        </div>
-        <div className="bg-white p-3 sm:p-4 md:p-6 rounded-lg border border-gray-200">
-          <div className="text-lg sm:text-xl md:text-2xl font-bold text-green-600 mb-1 sm:mb-2">{stats.activeRecruitments}</div>
-          <div className="text-xs sm:text-sm md:text-sm text-gray-600">Active Recruitments</div>
-        </div>
-        <div className="bg-white p-3 sm:p-4 md:p-6 rounded-lg border border-gray-200">
-          <div className="text-lg sm:text-xl md:text-2xl font-bold text-purple-600 mb-1 sm:mb-2">{stats.totalStudents}</div>
-          <div className="text-xs sm:text-sm md:text-sm text-gray-600">Total Students</div>
-        </div>
-        <div className="bg-white p-3 sm:p-4 md:p-6 rounded-lg border border-gray-200">
-          <div className="text-lg sm:text-xl md:text-2xl font-bold text-orange-600 mb-1 sm:mb-2">{stats.totalApplications}</div>
-          <div className="text-xs sm:text-sm md:text-sm text-gray-600">Total Applications</div>
-        </div>
-        <div className="bg-white p-3 sm:p-4 md:p-6 rounded-lg border border-gray-200">
-          <div className="text-lg sm:text-xl md:text-2xl font-bold text-red-600 mb-1 sm:mb-2">{stats.pendingApprovals}</div>
-          <div className="text-xs sm:text-sm md:text-sm text-gray-600">Pending Approvals</div>
-        </div>
-      </div>
-
-      {/* Navigation Tabs */}
-      <div className="bg-white rounded-lg border border-gray-200 mb-6">
-        <div className="border-b border-gray-200">
-          <nav className="flex space-x-4 md:space-x-8 px-4 md:px-6 overflow-x-auto">
-            {[
-              { id: 'overview', label: 'Overview', icon: Settings },
-              { id: 'companies', label: 'Companies', icon: Building2 },
-              { id: 'students', label: 'Students', icon: Users },
-              { id: 'applications', label: 'Applications', icon: FileText },
-            ].map(({ id, label, icon: Icon }) => (
+            <div className="flex flex-wrap gap-3">
               <button
-                key={id}
-                onClick={() => setActiveTab(id as any)}
-                className={`flex items-center space-x-2 py-4 px-2 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
-                  activeTab === id
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                onClick={handleReset}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white/10 hover:bg-white/15 text-sm"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Reset data
+              </button>
+              <button
+                onClick={logout}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white text-slate-900 text-sm font-medium"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            {(
+              [
+                ['overview', 'Overview'],
+                ['companies', 'Companies'],
+                ['students', 'Students'],
+                ['applications', 'Applications'],
+                ['offcampus', 'Off-campus'],
+              ] as [Tab, string][]
+            ).map(([tab, label]) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-2 rounded-full text-sm transition-colors ${
+                  activeTab === tab
+                    ? 'bg-white text-slate-950'
+                    : 'bg-white/10 text-slate-300 hover:bg-white/15'
                 }`}
               >
-                <Icon className="h-5 w-5" />
-                <span>{label}</span>
+                {label}
               </button>
             ))}
-          </nav>
-        </div>
-
-        <div className="p-4 md:p-6">
-          {activeTab === 'overview' && <OverviewTab />}
-          {activeTab === 'companies' && <CompaniesTab />}
-          {activeTab === 'students' && <StudentsTab />}
-          {activeTab === 'applications' && <ApplicationsTab />}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const OverviewTab: React.FC = () => {
-  return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        <div className="bg-blue-50 p-4 sm:p-6 rounded-lg">
-          <h3 className="text-base sm:text-lg font-semibold text-blue-900 mb-3 sm:mb-4">Quick Actions</h3>
-          <div className="space-y-2 sm:space-y-3">
-            <button className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 sm:py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2 text-sm md:text-base">
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Onboard New Company</span>
-              <span className="sm:hidden">Add Company</span>
-            </button>
-            <button className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 sm:py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2 text-sm md:text-base">
-              <Upload className="h-4 w-4" />
-              <span className="hidden sm:inline">Bulk Upload Students</span>
-              <span className="sm:hidden">Upload Students</span>
-            </button>
-            <button className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2.5 sm:py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2 text-sm md:text-base">
-              <Calendar className="h-4 w-4" />
-              <span className="hidden sm:inline">Set Application Windows</span>
-              <span className="sm:hidden">Set Windows</span>
-            </button>
           </div>
         </div>
+      </header>
 
-        <div className="bg-gray-50 p-4 sm:p-6 rounded-lg">
-          <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Recent Activity</h3>
-          <div className="space-y-2 sm:space-y-3 text-xs sm:text-sm">
-            <div className="flex items-start sm:items-center justify-between flex-col sm:flex-row gap-1 sm:gap-0">
-              <span className="text-gray-600">Google applications opened</span>
-              <span className="text-gray-500 text-xs">2 hours ago</span>
-            </div>
-            <div className="flex items-start sm:items-center justify-between flex-col sm:flex-row gap-1 sm:gap-0">
-              <span className="text-gray-600">Microsoft recruiter added</span>
-              <span className="text-gray-500 text-xs">1 day ago</span>
-            </div>
-            <div className="flex items-start sm:items-center justify-between flex-col sm:flex-row gap-1 sm:gap-0">
-              <span className="text-gray-600">45 students uploaded</span>
-              <span className="text-gray-500 text-xs">2 days ago</span>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+        {statusMessage && (
+          <div className="rounded-3xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm text-blue-800">
+            {statusMessage}
+          </div>
+        )}
+
+        {recruiterCredentials && (
+          <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4">
+            <div className="font-semibold text-emerald-900">Recruiter account created</div>
+            <div className="text-sm text-emerald-800 mt-1">
+              {recruiterCredentials.name}: {recruiterCredentials.email} /{' '}
+              {recruiterCredentials.password}
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-};
+        )}
 
-const CompaniesTab: React.FC = () => {
-  const [showOnboardingForm, setShowOnboardingForm] = useState(false);
+        <section className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <StatCard value={stats.totalCompanies} label="Companies" color="text-blue-600" />
+          <StatCard value={stats.activeCompanies} label="Open roles" color="text-emerald-600" />
+          <StatCard value={stats.totalStudents} label="Students" color="text-violet-600" />
+          <StatCard value={stats.totalApplications} label="Applications" color="text-orange-600" />
+          <StatCard value={stats.pendingApplications} label="Pending review" color="text-rose-600" />
+        </section>
 
-  return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h3 className="text-base sm:text-lg font-semibold text-gray-900">Company Management</h3>
-        <button
-          onClick={() => setShowOnboardingForm(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2 text-sm"
-        >
-          <Plus className="h-4 w-4" />
-          <span className="hidden sm:inline">Onboard Company</span>
-          <span className="sm:hidden">Add Company</span>
-        </button>
-      </div>
+        {activeTab === 'overview' && (
+          <div className="grid lg:grid-cols-[1.25fr_0.75fr] gap-6">
+            <div className="rounded-3xl bg-white border border-slate-200 p-6">
+              <h2 className="text-xl font-semibold text-slate-900">What works offline</h2>
+              <div className="grid md:grid-cols-2 gap-4 mt-5">
+                <FeatureCard
+                  icon={<Building2 className="w-5 h-5" />}
+                  title="Company onboarding"
+                  description="New companies create persistent recruiter accounts with stored credentials."
+                />
+                <FeatureCard
+                  icon={<Upload className="w-5 h-5" />}
+                  title="Student imports"
+                  description="CSV imports create local student accounts that survive refreshes."
+                />
+                <FeatureCard
+                  icon={<Calendar className="w-5 h-5" />}
+                  title="Application windows"
+                  description="Eligibility rules and windows are stored against each company."
+                />
+                <FeatureCard
+                  icon={<FileText className="w-5 h-5" />}
+                  title="Recruiter reviews"
+                  description="Scores and status changes update instantly for student and recruiter views."
+                />
+              </div>
+            </div>
 
-      {showOnboardingForm ? (
-        <CompanyOnboardingForm onClose={() => setShowOnboardingForm(false)} />
-      ) : (
-        <div className="space-y-4">
-          {/* Desktop Table View */}
-          <div className="hidden md:block bg-white border border-gray-200 rounded-lg overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Applications</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deadline</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                <tr>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="h-10 w-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                        <Building2 className="h-6 w-6 text-blue-600" />
+            <div className="rounded-3xl bg-white border border-slate-200 p-6">
+              <h2 className="text-xl font-semibold text-slate-900">Recent companies</h2>
+              <div className="space-y-4 mt-5">
+                {companies.slice(0, 4).map((company) => (
+                  <div key={company.id} className="rounded-2xl border border-slate-200 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-slate-900">{company.name}</div>
+                        <div className="text-sm text-slate-500">{company.recruiterEmail}</div>
                       </div>
-                      <div className="ml-4">
-                        <div className="text-sm font-medium text-gray-900">Google</div>
-                        <div className="text-sm text-gray-500">Technology</div>
-                      </div>
+                      <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+                        {company.status}
+                      </span>
                     </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                      Active
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">156</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Mar 1, 2025</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <button className="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                    <button className="text-red-600 hover:text-red-900">Deactivate</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile Card View */}
-          <div className="md:hidden space-y-3">
-            <div className="bg-white border border-gray-200 rounded-lg p-4">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center space-x-3">
-                  <div className="h-10 w-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Building2 className="h-6 w-6 text-blue-600" />
                   </div>
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">Google</div>
-                    <div className="text-xs text-gray-500">Technology</div>
-                  </div>
-                </div>
-                <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                  Active
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div>
-                  <span className="text-gray-500">Applications:</span>
-                  <span className="ml-1 font-medium">156</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Deadline:</span>
-                  <span className="ml-1 font-medium">Mar 1, 2025</span>
-                </div>
-              </div>
-              <div className="flex space-x-3 mt-3 pt-3 border-t border-gray-100">
-                <button className="text-blue-600 hover:text-blue-900 text-xs font-medium">Edit</button>
-                <button className="text-red-600 hover:text-red-900 text-xs font-medium">Deactivate</button>
+                ))}
               </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-};
+        )}
 
-const StudentsTab: React.FC = () => {
-  const [showBulkUpload, setShowBulkUpload] = useState(false);
+        {activeTab === 'companies' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap gap-3 justify-between items-center">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Company management</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  All company and recruiter records live entirely in the browser.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => setShowWindowForm((current) => !current)}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium"
+                >
+                  <Calendar className="w-4 h-4" />
+                  Set window
+                </button>
+                <button
+                  onClick={() => setShowCompanyForm((current) => !current)}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 text-white px-4 py-3 text-sm font-medium"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add company
+                </button>
+              </div>
+            </div>
 
-  return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h3 className="text-base sm:text-lg font-semibold text-gray-900">Student Management</h3>
-        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-          <button
-            onClick={() => setShowBulkUpload(true)}
-            className="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2 text-sm"
-          >
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">Bulk Upload</span>
-            <span className="sm:hidden">Upload</span>
-          </button>
-          <button className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2 text-sm">
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Export Data</span>
-            <span className="sm:hidden">Export</span>
-          </button>
-        </div>
-      </div>
+            {showCompanyForm && (
+              <CompanyOnboardingForm
+                onClose={() => setShowCompanyForm(false)}
+                onSubmit={async (companyData) => {
+                  const result = createCompany(companyData);
+                  setRecruiterCredentials(result.recruiter);
+                  setStatusMessage(`${result.company.name} was added to the local company list.`);
+                  setShowCompanyForm(false);
+                }}
+              />
+            )}
 
-      {showBulkUpload ? (
-        <StudentBulkUpload onClose={() => setShowBulkUpload(false)} />
-      ) : (
-        <div className="bg-white border border-gray-200 rounded-lg p-4 sm:p-6">
-          <div className="text-center py-6 sm:py-8">
-            <Users className="h-12 w-12 sm:h-16 sm:w-16 text-gray-300 mx-auto mb-3 sm:mb-4" />
-            <p className="text-gray-500 text-base sm:text-lg">Student management interface</p>
-            <p className="text-gray-400 text-sm sm:text-base">Upload student lists, manage profiles, and track eligibility</p>
+            {showWindowForm && (
+              <ApplicationWindow
+                companies={companies.map((company) => ({
+                  id: company.id,
+                  name: company.name,
+                }))}
+                onClose={() => setShowWindowForm(false)}
+                onSubmit={async (payload) => {
+                  const company = configureApplicationWindow(payload);
+                  setStatusMessage(`Application window updated for ${company.name}.`);
+                  setShowWindowForm(false);
+                }}
+              />
+            )}
+
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {companies.map((company) => (
+                <CompanyAdminCard
+                  key={company.id}
+                  company={company}
+                  applicationCount={
+                    applications.filter((application) => application.companyId === company.id)
+                      .length
+                  }
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-};
+        )}
 
-const ApplicationsTab: React.FC = () => {
-  const [showApplicationWindow, setShowApplicationWindow] = useState(false);
+        {activeTab === 'students' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap gap-3 justify-between items-center">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Student registry</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  Imported students automatically get local login access with `student123`.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={handleExportStudents}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium"
+                >
+                  <Download className="w-4 h-4" />
+                  Export CSV
+                </button>
+                <button
+                  onClick={() => setShowBulkUpload((current) => !current)}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-green-600 text-white px-4 py-3 text-sm font-medium"
+                >
+                  <Upload className="w-4 h-4" />
+                  Bulk upload
+                </button>
+              </div>
+            </div>
 
-  return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h3 className="text-base sm:text-lg font-semibold text-gray-900">Application Management</h3>
-        <button
-          onClick={() => setShowApplicationWindow(true)}
-          className="bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2 text-sm"
-        >
-          <Calendar className="h-4 w-4" />
-          <span className="hidden sm:inline">Set Application Window</span>
-          <span className="sm:hidden">Set Window</span>
-        </button>
-      </div>
+            {showBulkUpload && (
+              <StudentBulkUpload
+                onClose={() => setShowBulkUpload(false)}
+                onUpload={async (rows) => {
+                  const result = bulkImportStudents(rows);
+                  setStatusMessage(
+                    `Imported ${result.addedCount} students. ${result.skippedCount} duplicates were skipped.`
+                  );
+                  return result;
+                }}
+              />
+            )}
 
-      {showApplicationWindow ? (
-        <ApplicationWindow onClose={() => setShowApplicationWindow(false)} />
-      ) : (
-        <div className="bg-white border border-gray-200 rounded-lg p-4 sm:p-6">
-          <div className="text-center py-6 sm:py-8">
-            <FileText className="h-12 w-12 sm:h-16 sm:w-16 text-gray-300 mx-auto mb-3 sm:mb-4" />
-            <p className="text-gray-500 text-base sm:text-lg">Application window management</p>
-            <p className="text-gray-400 text-sm sm:text-base">Set deadlines, manage application periods, and control access</p>
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {students.map((student) => (
+                <StudentCard key={student.id} student={student} />
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {activeTab === 'applications' && (
+          <div className="rounded-3xl bg-white border border-slate-200 overflow-hidden">
+            <div className="p-6 border-b border-slate-200">
+              <h2 className="text-xl font-semibold text-slate-900">Application ledger</h2>
+              <p className="text-sm text-slate-500 mt-1">
+                Students create these records locally, recruiters update them locally, and admins can audit the full flow.
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {['Student', 'Company', 'Status', 'Score', 'Submitted'].map((heading) => (
+                      <th
+                        key={heading}
+                        className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500"
+                      >
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white">
+                  {applicationRows.map((application) => (
+                    <tr key={application.id}>
+                      <td className="px-6 py-4 text-sm">
+                        <div className="font-medium text-slate-900">{application.student?.name}</div>
+                        <div className="text-slate-500">{application.student?.rollNumber}</div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-700">
+                        {application.company?.name}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-700 capitalize">
+                        {application.status}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-700">
+                        {application.score ?? '--'}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-700">
+                        {new Date(application.submittedAt).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'offcampus' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap gap-3 justify-between items-center">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Off-campus opportunities</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  Students can track these locally from their dashboard.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowOpportunityForm((current) => !current)}
+                className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 text-white px-4 py-3 text-sm font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                Add opportunity
+              </button>
+            </div>
+
+            {showOpportunityForm && (
+              <form
+                onSubmit={handleCreateOpportunity}
+                className="rounded-3xl bg-white border border-slate-200 p-6 grid md:grid-cols-2 gap-4"
+              >
+                <Input
+                  label="Role title"
+                  value={opportunityForm.title}
+                  onChange={(value) =>
+                    setOpportunityForm((current) => ({ ...current, title: value }))
+                  }
+                />
+                <Input
+                  label="Company"
+                  value={opportunityForm.company}
+                  onChange={(value) =>
+                    setOpportunityForm((current) => ({ ...current, company: value }))
+                  }
+                />
+                <Input
+                  label="Location"
+                  value={opportunityForm.location}
+                  onChange={(value) =>
+                    setOpportunityForm((current) => ({ ...current, location: value }))
+                  }
+                />
+                <Input
+                  label="Salary/Stipend"
+                  value={opportunityForm.salary}
+                  onChange={(value) =>
+                    setOpportunityForm((current) => ({ ...current, salary: value }))
+                  }
+                />
+                <Input
+                  label="Skills"
+                  value={opportunityForm.skills}
+                  onChange={(value) =>
+                    setOpportunityForm((current) => ({ ...current, skills: value }))
+                  }
+                  helper="Comma-separated"
+                />
+                <Input
+                  label="Deadline"
+                  type="date"
+                  value={opportunityForm.applicationDeadline}
+                  onChange={(value) =>
+                    setOpportunityForm((current) => ({
+                      ...current,
+                      applicationDeadline: value,
+                    }))
+                  }
+                />
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Type</label>
+                  <select
+                    value={opportunityForm.type}
+                    onChange={(event) =>
+                      setOpportunityForm((current) => ({
+                        ...current,
+                        type: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+                  >
+                    {['internship', 'full-time', 'remote', 'part-time', 'freelance'].map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Experience</label>
+                  <select
+                    value={opportunityForm.experience}
+                    onChange={(event) =>
+                      setOpportunityForm((current) => ({
+                        ...current,
+                        experience: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+                  >
+                    {['fresher', 'experienced', 'any'].map((level) => (
+                      <option key={level} value={level}>
+                        {level}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-slate-700 mt-8">
+                  <input
+                    type="checkbox"
+                    checked={opportunityForm.isRemote}
+                    onChange={(event) =>
+                      setOpportunityForm((current) => ({
+                        ...current,
+                        isRemote: event.target.checked,
+                      }))
+                    }
+                  />
+                  Remote friendly
+                </label>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    value={opportunityForm.description}
+                    onChange={(event) =>
+                      setOpportunityForm((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                    rows={4}
+                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+                  />
+                </div>
+                <div className="md:col-span-2 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowOpportunityForm(false)}
+                    className="px-5 py-3 rounded-2xl border border-slate-200 text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-3 rounded-2xl bg-slate-900 text-white font-semibold"
+                  >
+                    Create opportunity
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {offCampusOpportunities.map((opportunity) => (
+                <div
+                  key={opportunity.id}
+                  className="rounded-3xl bg-white border border-slate-200 p-5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-slate-900">{opportunity.title}</div>
+                      <div className="text-sm text-slate-500 mt-1">{opportunity.company}</div>
+                    </div>
+                    <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+                      {opportunity.type}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-600 mt-4 line-clamp-3">
+                    {opportunity.description}
+                  </p>
+                  <div className="mt-4 text-sm text-slate-500">
+                    {opportunity.location} · deadline{' '}
+                    {new Date(opportunity.applicationDeadline).toLocaleDateString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
     </div>
   );
 };
+
+const StatCard: React.FC<{ value: number; label: string; color: string }> = ({
+  value,
+  label,
+  color,
+}) => (
+  <div className="rounded-3xl bg-white border border-slate-200 p-5">
+    <div className={`text-3xl font-bold ${color}`}>{value}</div>
+    <div className="text-sm text-slate-500 mt-2">{label}</div>
+  </div>
+);
+
+const FeatureCard: React.FC<{
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}> = ({ icon, title, description }) => (
+  <div className="rounded-3xl border border-slate-200 p-5">
+    <div className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center">
+      {icon}
+    </div>
+    <div className="font-semibold text-slate-900 mt-4">{title}</div>
+    <p className="text-sm text-slate-500 mt-2 leading-6">{description}</p>
+  </div>
+);
+
+const CompanyAdminCard: React.FC<{
+  company: CompanyRecord;
+  applicationCount: number;
+}> = ({ company, applicationCount }) => (
+  <div className="rounded-3xl bg-white border border-slate-200 p-5">
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="font-semibold text-slate-900">{company.name}</div>
+        <div className="text-sm text-slate-500 mt-1">{company.industry}</div>
+      </div>
+      <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+        {company.status}
+      </span>
+    </div>
+    <div className="mt-4 space-y-2 text-sm text-slate-600">
+      <div>Recruiter: {company.recruiterName}</div>
+      <div>Email: {company.recruiterEmail}</div>
+      <div>Applications: {applicationCount}</div>
+      <div>Deadline: {new Date(company.applicationDeadline).toLocaleDateString()}</div>
+    </div>
+  </div>
+);
+
+const StudentCard: React.FC<{ student: StudentRecord }> = ({ student }) => (
+  <div className="rounded-3xl bg-white border border-slate-200 p-5">
+    <div className="flex items-start gap-4">
+      <div className="w-12 h-12 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center shrink-0">
+        <GraduationCap className="w-5 h-5" />
+      </div>
+      <div className="min-w-0">
+        <div className="font-semibold text-slate-900">{student.name}</div>
+        <div className="text-sm text-slate-500">{student.rollNumber}</div>
+        <div className="text-sm text-slate-600 mt-3">{student.branch}</div>
+        <div className="text-sm text-slate-600">CGPA {student.cgpa.toFixed(1)} · Batch {student.batch}</div>
+      </div>
+    </div>
+    <div className="flex flex-wrap gap-2 mt-4">
+      {student.skills.slice(0, 4).map((skill) => (
+        <span key={skill} className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+          {skill}
+        </span>
+      ))}
+    </div>
+  </div>
+);
+
+const Input: React.FC<{
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  helper?: string;
+}> = ({ label, value, onChange, type = 'text', helper }) => (
+  <div>
+    <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
+    <input
+      type={type}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+    />
+    {helper && <p className="text-xs text-slate-500 mt-2">{helper}</p>}
+  </div>
+);
 
 export default AdminDashboard;

@@ -1,421 +1,469 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Filter, Star, Download, Eye, CheckCircle, X, Users, FileText, TrendingUp } from 'lucide-react';
-import { Application, Student } from '../types';
+import React, { useMemo, useState } from 'react';
+import {
+  BarChart3,
+  CheckCircle2,
+  Download,
+  LogOut,
+  Search,
+  Users,
+} from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import { dashboardService, applicationsService, companiesService } from '../services';
+import {
+  getApplicationsForCompany,
+  getCompanyByUser,
+  getPlacementSnapshot,
+  getRecruiterStats,
+  usePlacementStore,
+} from '../store/placementStore';
+
+type Tab = 'applications' | 'analytics';
 
 const RecruiterDashboard: React.FC = () => {
-  const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'applications' | 'rounds' | 'analytics'>('applications');
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
+  const applications = usePlacementStore((state) => state.applications);
+  const students = usePlacementStore((state) => state.students);
+  const companies = usePlacementStore((state) => state.companies);
+  const updateApplicationStatus = usePlacementStore(
+    (state) => state.updateApplicationStatus
+  );
+  const updateApplicationScore = usePlacementStore(
+    (state) => state.updateApplicationScore
+  );
+  const bulkUpdateApplications = usePlacementStore(
+    (state) => state.bulkUpdateApplications
+  );
+
+  const [activeTab, setActiveTab] = useState<Tab>('applications');
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterCriteria, setFilterCriteria] = useState({
-    branch: 'all',
-    cgpa: 'all',
-    status: 'all',
-  });
+  const [statusFilter, setStatusFilter] = useState('all');
   const [selectedApplications, setSelectedApplications] = useState<string[]>([]);
-  const [applications, setApplications] = useState<any[]>([]);
-  const [stats, setStats] = useState({
-    totalApplications: 0,
-    underReview: 0,
-    shortlisted: 0,
-    avgScore: 0,
-  });
-  const [loading, setLoading] = useState(true);
+  const [statusMessage, setStatusMessage] = useState('');
 
-  useEffect(() => {
-    if (user?.companyId) {
-      fetchDashboardData();
-    }
-  }, [user]);
+  const snapshot = useMemo(
+    () => getPlacementSnapshot(),
+    [applications, companies, students]
+  );
+  const company = useMemo(() => getCompanyByUser(snapshot, user), [snapshot, user]);
+  const companyApplications = useMemo(
+    () => (company ? getApplicationsForCompany(snapshot, company.id) : []),
+    [snapshot, company]
+  );
+  const stats = useMemo(
+    () => (company ? getRecruiterStats(snapshot, company.id) : null),
+    [snapshot, company]
+  );
 
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      
-      // Fetch recruiter dashboard data
-      const dashboardResponse = await dashboardService.getRecruiterDashboard(user!.companyId!);
-      if (dashboardResponse.success && dashboardResponse.data) {
-        const dashboardStats = dashboardResponse.data.stats;
-        setStats({
-          totalApplications: dashboardStats.totalApplications || 0,
-          underReview: dashboardStats.applicationsInReview || 0,
-          shortlisted: dashboardStats.shortlistedApplications || 0,
-          avgScore: dashboardStats.averageScore || 0,
-        });
-      }
+  const filteredApplications = useMemo(() => {
+    const search = searchTerm.toLowerCase();
+    return companyApplications.filter((application) => {
+      const matchesSearch =
+        application.student?.name.toLowerCase().includes(search) ||
+        application.student?.rollNumber.toLowerCase().includes(search);
+      const matchesStatus =
+        statusFilter === 'all' || application.status === statusFilter;
+      return Boolean(matchesSearch) && matchesStatus;
+    });
+  }, [companyApplications, searchTerm, statusFilter]);
 
-      // Fetch company applications
-      const appsResponse = await applicationsService.getCompanyApplications(user!.companyId!);
-      if (appsResponse.success && appsResponse.data) {
-        setApplications(appsResponse.data);
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
+  const analytics = useMemo(() => {
+    const byBranch = filteredApplications.reduce<Record<string, number>>(
+      (accumulator, application) => {
+        const branch = application.student?.branch || 'Unknown';
+        accumulator[branch] = (accumulator[branch] || 0) + 1;
+        return accumulator;
+      },
+      {}
+    );
+
+    const byStatus = filteredApplications.reduce<Record<string, number>>(
+      (accumulator, application) => {
+        accumulator[application.status] = (accumulator[application.status] || 0) + 1;
+        return accumulator;
+      },
+      {}
+    );
+
+    return { byBranch, byStatus };
+  }, [filteredApplications]);
+
+  const exportSelected = () => {
+    const rows = filteredApplications.filter((application) =>
+      selectedApplications.includes(application.id)
+    );
+    const csv = [
+      ['Student', 'Roll Number', 'Status', 'Score'],
+      ...rows.map((application) => [
+        application.student?.name || '',
+        application.student?.rollNumber || '',
+        application.status,
+        String(application.score ?? ''),
+      ]),
+    ]
+      .map((row) => row.map((value) => `"${value}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${company?.name || 'applications'}-export.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
-  const filteredApplications = applications.filter(app => {
-    const matchesSearch = app.student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         app.student.rollNumber.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesBranch = filterCriteria.branch === 'all' || app.student.branch === filterCriteria.branch;
-    const matchesCGPA = filterCriteria.cgpa === 'all' || 
-                       (filterCriteria.cgpa === 'high' && app.student.cgpa >= 9.0) ||
-                       (filterCriteria.cgpa === 'medium' && app.student.cgpa >= 7.5 && app.student.cgpa < 9.0);
-    const matchesStatus = filterCriteria.status === 'all' || app.status === filterCriteria.status;
-    
-    return matchesSearch && matchesBranch && matchesCGPA && matchesStatus;
-  });
-
-  const handleScoreChange = async (applicationId: string, score: number) => {
-    try {
-      await applicationsService.updateApplicationScore(applicationId, { score });
-      // Refresh data after update
-      fetchDashboardData();
-    } catch (error) {
-      console.error('Error updating score:', error);
-    }
-  };
-
-  const handleStatusChange = async (applicationId: string, status: string) => {
-    try {
-      await applicationsService.updateApplicationStatus(applicationId, { status });
-      // Refresh data after update
-      fetchDashboardData();
-    } catch (error) {
-      console.error('Error updating status:', error);
-    }
-  };
-
-  const handleBulkAction = async (action: string) => {
-    try {
-      if (action === 'shortlist') {
-        await applicationsService.bulkUpdateApplications({
-          applicationIds: selectedApplications,
-          status: 'shortlisted',
-        });
-      } else if (action === 'reject') {
-        await applicationsService.bulkUpdateApplications({
-          applicationIds: selectedApplications,
-          status: 'rejected',
-        });
-      }
-      // Refresh data and clear selection
-      fetchDashboardData();
-      setSelectedApplications([]);
-    } catch (error) {
-      console.error('Error performing bulk action:', error);
-    }
-  };
+  if (!company || !stats) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="rounded-3xl bg-white border border-slate-200 p-8 text-center max-w-lg">
+          <h1 className="text-2xl font-semibold text-slate-900">Recruiter company not found</h1>
+          <p className="text-slate-600 mt-3">
+            This recruiter account is not linked to a company. Contact an administrator to complete account setup.
+          </p>
+          <button
+            onClick={logout}
+            className="mt-6 px-5 py-3 rounded-2xl bg-slate-900 text-white font-semibold"
+          >
+            Logout
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Recruiter Dashboard</h1>
-        <p className="text-gray-600">Manage applications and recruitment process for Juspay</p>
-      </div>
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-slate-950 text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <p className="text-sm uppercase tracking-[0.25em] text-sky-200/70">
+                Recruiter Portal
+              </p>
+              <h1 className="text-3xl font-bold mt-2">{company.name}</h1>
+              <p className="text-slate-300 mt-2">
+                Review applicants, score candidates, and update hiring outcomes.
+              </p>
+            </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8">
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="text-xl md:text-2xl font-bold text-blue-600 mb-2">{stats.totalApplications}</div>
-          <div className="text-xs md:text-sm text-gray-600">Total Applications</div>
-        </div>
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="text-xl md:text-2xl font-bold text-yellow-600 mb-2">{stats.underReview}</div>
-          <div className="text-xs md:text-sm text-gray-600">Under Review</div>
-        </div>
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="text-xl md:text-2xl font-bold text-green-600 mb-2">{stats.shortlisted}</div>
-          <div className="text-xs md:text-sm text-gray-600">Shortlisted</div>
-        </div>
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="text-xl md:text-2xl font-bold text-purple-600 mb-2">{stats.avgScore.toFixed(1)}</div>
-          <div className="text-xs md:text-sm text-gray-600">Average Score</div>
-        </div>
-      </div>
+            <button
+              onClick={logout}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white text-slate-900 text-sm font-medium self-start"
+            >
+              <LogOut className="w-4 h-4" />
+              Logout
+            </button>
+          </div>
 
-      {/* Navigation Tabs */}
-      <div className="bg-white rounded-lg border border-gray-200 mb-6">
-        <div className="border-b border-gray-200">
-          <nav className="flex space-x-4 md:space-x-8 px-4 md:px-6 overflow-x-auto">
-            {[
-              { id: 'applications', label: 'Applications', icon: FileText },
-              { id: 'rounds', label: 'Rounds', icon: Users },
-              { id: 'analytics', label: 'Analytics', icon: TrendingUp },
-            ].map(({ id, label, icon: Icon }) => (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+            <StatCard value={stats.totalApplications} label="Applications" color="text-blue-600" />
+            <StatCard value={stats.applicationsInReview} label="In review" color="text-orange-600" />
+            <StatCard value={stats.shortlistedApplications} label="Shortlisted" color="text-emerald-600" />
+            <StatCard value={stats.averageScore} label="Avg score" color="text-violet-600" />
+          </div>
+
+          <div className="flex flex-wrap gap-3 mt-6">
+            {(
+              [
+                ['applications', 'Applications'],
+                ['analytics', 'Analytics'],
+              ] as [Tab, string][]
+            ).map(([tab, label]) => (
               <button
-                key={id}
-                onClick={() => setActiveTab(id as any)}
-                className={`flex items-center space-x-2 py-4 px-2 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
-                  activeTab === id
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-2 rounded-full text-sm transition-colors ${
+                  activeTab === tab
+                    ? 'bg-white text-slate-950'
+                    : 'bg-white/10 text-slate-300 hover:bg-white/15'
                 }`}
               >
-                <Icon className="h-5 w-5" />
-                <span>{label}</span>
+                {label}
               </button>
             ))}
-          </nav>
-        </div>
-
-        <div className="p-4 md:p-6">
-          {activeTab === 'applications' && (
-            <ApplicationsTab
-              applications={filteredApplications}
-              searchTerm={searchTerm}
-              setSearchTerm={setSearchTerm}
-              filterCriteria={filterCriteria}
-              setFilterCriteria={setFilterCriteria}
-              selectedApplications={selectedApplications}
-              setSelectedApplications={setSelectedApplications}
-              onScoreChange={handleScoreChange}
-              onStatusChange={handleStatusChange}
-              onBulkAction={handleBulkAction}
-            />
-          )}
-          {activeTab === 'rounds' && <RoundsTab />}
-          {activeTab === 'analytics' && <AnalyticsTab />}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-interface ApplicationsTabProps {
-  applications: (Application & { student: Student })[];
-  searchTerm: string;
-  setSearchTerm: (term: string) => void;
-  filterCriteria: any;
-  setFilterCriteria: (criteria: any) => void;
-  selectedApplications: string[];
-  setSelectedApplications: (ids: string[]) => void;
-  onScoreChange: (id: string, score: number) => void;
-  onStatusChange: (id: string, status: string) => void;
-  onBulkAction: (action: string) => void;
-}
-
-const ApplicationsTab: React.FC<ApplicationsTabProps> = ({
-  applications,
-  searchTerm,
-  setSearchTerm,
-  filterCriteria,
-  setFilterCriteria,
-  selectedApplications,
-  setSelectedApplications,
-  onScoreChange,
-  onStatusChange,
-  onBulkAction,
-}) => {
-  const handleSelectAll = () => {
-    if (selectedApplications.length === applications.length) {
-      setSelectedApplications([]);
-    } else {
-      setSelectedApplications(applications.map(app => app.id));
-    }
-  };
-
-  const handleSelectApplication = (id: string) => {
-    setSelectedApplications(prev =>
-      prev.includes(id) ? prev.filter(appId => appId !== id) : [...prev, id]
-    );
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Search and Filters */}
-      <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by name or roll number..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-        </div>
-        
-        <select
-          value={filterCriteria.branch}
-          onChange={(e) => setFilterCriteria(prev => ({ ...prev, branch: e.target.value }))}
-          className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-        >
-          <option value="all">All Branches</option>
-          <option value="Computer Science">Computer Science</option>
-          <option value="Information Technology">Information Technology</option>
-          <option value="Electronics">Electronics</option>
-        </select>
-
-        <select
-          value={filterCriteria.cgpa}
-          onChange={(e) => setFilterCriteria(prev => ({ ...prev, cgpa: e.target.value }))}
-          className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-        >
-          <option value="all">All CGPA</option>
-          <option value="high">9.0+ CGPA</option>
-          <option value="medium">7.5-9.0 CGPA</option>
-        </select>
-
-        <select
-          value={filterCriteria.status}
-          onChange={(e) => setFilterCriteria(prev => ({ ...prev, status: e.target.value }))}
-          className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-        >
-          <option value="all">All Status</option>
-          <option value="submitted">Submitted</option>
-          <option value="under-review">Under Review</option>
-          <option value="shortlisted">Shortlisted</option>
-          <option value="rejected">Rejected</option>
-        </select>
-      </div>
-
-      {/* Bulk Actions */}
-      {selectedApplications.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 md:p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-blue-800 font-medium text-sm md:text-base">
-              {selectedApplications.length} application(s) selected
-            </span>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => onBulkAction('shortlist')}
-                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-              >
-                Shortlist
-              </button>
-              <button
-                onClick={() => onBulkAction('reject')}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-              >
-                Reject
-              </button>
-              <button
-                onClick={() => onBulkAction('export')}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-3 md:px-4 py-2 rounded-lg text-sm transition-colors flex items-center space-x-1"
-              >
-                <Download className="h-4 w-4" />
-                <span>Export</span>
-              </button>
-            </div>
           </div>
         </div>
-      )}
+      </header>
 
-      {/* Applications Table */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+        {statusMessage && (
+          <div className="rounded-3xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm text-blue-800">
+            {statusMessage}
+          </div>
+        )}
+
+        {activeTab === 'applications' && (
+          <>
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div className="relative max-w-md w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                 <input
-                  type="checkbox"
-                  checked={selectedApplications.length === applications.length && applications.length > 0}
-                  onChange={handleSelectAll}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Search by name or roll number"
+                  className="w-full rounded-2xl border border-slate-200 bg-white pl-11 pr-4 py-3 outline-none focus:border-slate-900"
                 />
-              </th>
-              <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student</th>
-              <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CGPA</th>
-              <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Skills</th>
-              <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-              <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {applications.map((application) => (
-              <tr key={application.id} className="hover:bg-gray-50">
-                <td className="px-3 md:px-6 py-4">
-                  <input
-                    type="checkbox"
-                    checked={selectedApplications.includes(application.id)}
-                    onChange={() => handleSelectApplication(application.id)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                </td>
-                <td className="px-3 md:px-6 py-4 whitespace-nowrap">
-                  <div>
-                    <div className="text-xs md:text-sm font-medium text-gray-900">{application.student.name}</div>
-                    <div className="text-xs text-gray-500">{application.student.rollNumber} • {application.student.branch}</div>
-                  </div>
-                </td>
-                <td className="px-3 md:px-6 py-4 whitespace-nowrap">
-                  <span className="text-sm font-medium text-gray-900">{application.student.cgpa}</span>
-                </td>
-                <td className="px-3 md:px-6 py-4">
-                  <div className="flex flex-wrap gap-1">
-                    {application.student.skills.slice(0, 2).map((skill, index) => (
-                      <span key={index} className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs">
-                        {skill}
-                      </span>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <select
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-900"
+                >
+                  <option value="all">All statuses</option>
+                  <option value="submitted">Submitted</option>
+                  <option value="under-review">Under review</option>
+                  <option value="shortlisted">Shortlisted</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="selected">Selected</option>
+                </select>
+
+                {selectedApplications.length > 0 && (
+                  <>
+                    <button
+                      onClick={() => {
+                        bulkUpdateApplications(selectedApplications, 'shortlisted');
+                        setStatusMessage('Selected applications were shortlisted.');
+                        setSelectedApplications([]);
+                      }}
+                      className="px-4 py-3 rounded-2xl bg-emerald-600 text-white text-sm font-medium"
+                    >
+                      Shortlist
+                    </button>
+                    <button
+                      onClick={() => {
+                        bulkUpdateApplications(selectedApplications, 'rejected');
+                        setStatusMessage('Selected applications were rejected.');
+                        setSelectedApplications([]);
+                      }}
+                      className="px-4 py-3 rounded-2xl bg-rose-600 text-white text-sm font-medium"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      onClick={exportSelected}
+                      className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-medium"
+                    >
+                      <Download className="w-4 h-4" />
+                      Export
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-3xl bg-white border border-slate-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left">
+                        <input
+                          type="checkbox"
+                          checked={
+                            filteredApplications.length > 0 &&
+                            selectedApplications.length === filteredApplications.length
+                          }
+                          onChange={(event) =>
+                            setSelectedApplications(
+                              event.target.checked
+                                ? filteredApplications.map((application) => application.id)
+                                : []
+                            )
+                          }
+                        />
+                      </th>
+                      {['Student', 'Branch', 'Skills', 'Score', 'Status'].map((heading) => (
+                        <th
+                          key={heading}
+                          className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500"
+                        >
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {filteredApplications.map((application) => (
+                      <tr key={application.id}>
+                        <td className="px-6 py-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedApplications.includes(application.id)}
+                            onChange={(event) =>
+                              setSelectedApplications((current) =>
+                                event.target.checked
+                                  ? [...current, application.id]
+                                  : current.filter((entry) => entry !== application.id)
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <div className="font-medium text-slate-900">
+                            {application.student?.name}
+                          </div>
+                          <div className="text-slate-500">{application.student?.rollNumber}</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700">
+                          {application.student?.branch}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700">
+                          <div className="flex flex-wrap gap-2">
+                            {application.student?.skills.slice(0, 3).map((skill) => (
+                              <span
+                                key={skill}
+                                className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700"
+                              >
+                                {skill}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={application.score ?? ''}
+                            onChange={(event) => {
+                              const value = Number(event.target.value);
+                              updateApplicationScore(application.id, value);
+                            }}
+                            className="w-24 rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-slate-900"
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <select
+                            value={application.status}
+                            onChange={(event) => {
+                              updateApplicationStatus(
+                                application.id,
+                                event.target.value as typeof application.status
+                              );
+                              setStatusMessage(
+                                `${application.student?.name} is now ${event.target.value}.`
+                              );
+                            }}
+                            className="rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-slate-900"
+                          >
+                            {['submitted', 'under-review', 'shortlisted', 'selected', 'rejected'].map((status) => (
+                              <option key={status} value={status}>
+                                {status}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
                     ))}
-                    {application.student.skills.length > 2 && (
-                      <span className="text-gray-500 text-xs">+{application.student.skills.length - 2}</span>
-                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {filteredApplications.length === 0 && (
+              <div className="rounded-3xl bg-white border border-slate-200 p-10 text-center">
+                <Users className="w-10 h-10 text-slate-400 mx-auto" />
+                <div className="text-lg font-semibold text-slate-900 mt-4">
+                  No applications match the current filters
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === 'analytics' && (
+          <div className="grid lg:grid-cols-2 gap-6">
+            <AnalyticsCard
+              title="Applications by branch"
+              icon={<Users className="w-5 h-5" />}
+              rows={analytics.byBranch}
+            />
+            <AnalyticsCard
+              title="Pipeline status"
+              icon={<BarChart3 className="w-5 h-5" />}
+              rows={analytics.byStatus}
+            />
+            <div className="rounded-3xl bg-white border border-slate-200 p-6 lg:col-span-2">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-lg font-semibold text-slate-900">Top candidates</div>
+                  <div className="text-sm text-slate-500 mt-1">
+                    Highest-scoring candidates currently in your local pipeline.
                   </div>
-                </td>
-                <td className="px-3 md:px-6 py-4 whitespace-nowrap">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={application.score || ''}
-                    onChange={(e) => onScoreChange(application.id, parseInt(e.target.value))}
-                    className="w-16 p-1 border border-gray-300 rounded text-sm"
-                    placeholder="0-100"
-                  />
-                </td>
-                <td className="px-3 md:px-6 py-4 whitespace-nowrap">
-                  <select
-                    value={application.status}
-                    onChange={(e) => onStatusChange(application.id, e.target.value)}
-                    className="text-sm border border-gray-300 rounded px-2 py-1"
-                  >
-                    <option value="submitted">Submitted</option>
-                    <option value="under-review">Under Review</option>
-                    <option value="shortlisted">Shortlisted</option>
-                    <option value="rejected">Rejected</option>
-                  </select>
-                </td>
-                <td className="px-3 md:px-6 py-4 whitespace-nowrap text-sm font-medium">
-                  <button className="text-blue-600 hover:text-blue-900 mr-3">
-                    <Eye className="h-4 w-4" />
-                  </button>
-                  <button className="text-green-600 hover:text-green-900">
-                    <CheckCircle className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4 mt-6">
+                {companyApplications
+                  .filter((application) => typeof application.score === 'number')
+                  .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
+                  .slice(0, 6)
+                  .map((application) => (
+                    <div
+                      key={application.id}
+                      className="rounded-2xl border border-slate-200 p-4"
+                    >
+                      <div className="font-semibold text-slate-900">
+                        {application.student?.name}
+                      </div>
+                      <div className="text-sm text-slate-500 mt-1">
+                        {application.student?.rollNumber} · {application.student?.branch}
+                      </div>
+                      <div className="text-sm text-slate-700 mt-3">
+                        Score {application.score}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+};
+
+const StatCard: React.FC<{ value: number; label: string; color: string }> = ({
+  value,
+  label,
+  color,
+}) => (
+  <div className="rounded-3xl bg-white/5 border border-white/10 p-4">
+    <div className={`text-2xl font-bold ${color}`}>{value}</div>
+    <div className="text-sm text-slate-300 mt-1">{label}</div>
+  </div>
+);
+
+const AnalyticsCard: React.FC<{
+  title: string;
+  icon: React.ReactNode;
+  rows: Record<string, number>;
+}> = ({ title, icon, rows }) => (
+  <div className="rounded-3xl bg-white border border-slate-200 p-6">
+    <div className="flex items-center gap-3">
+      <div className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center">
+        {icon}
       </div>
+      <div className="text-lg font-semibold text-slate-900">{title}</div>
     </div>
-  );
-};
 
-const RoundsTab: React.FC = () => {
-  return (
-    <div className="text-center py-8">
-      <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-      <p className="text-gray-500 text-lg">Round management interface</p>
-      <p className="text-gray-400">Manage recruitment rounds and move candidates through the process</p>
+    <div className="space-y-3 mt-6">
+      {Object.entries(rows).map(([label, value]) => (
+        <div
+          key={label}
+          className="flex items-center justify-between rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3"
+        >
+          <span className="text-sm text-slate-700 capitalize">{label}</span>
+          <span className="text-sm font-semibold text-slate-900">{value}</span>
+        </div>
+      ))}
     </div>
-  );
-};
-
-const AnalyticsTab: React.FC = () => {
-  return (
-    <div className="text-center py-8">
-      <TrendingUp className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-      <p className="text-gray-500 text-lg">Analytics dashboard</p>
-      <p className="text-gray-400">View recruitment metrics, conversion rates, and performance insights</p>
-    </div>
-  );
-};
+  </div>
+);
 
 export default RecruiterDashboard;

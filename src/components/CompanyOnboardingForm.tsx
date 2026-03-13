@@ -1,351 +1,288 @@
 import React, { useState } from 'react';
-import { X, Plus, Trash2, Building2, Mail, User } from 'lucide-react';
+import { Building2, Plus, Trash2, X } from 'lucide-react';
 import { CompanyOnboarding } from '../types';
 
 interface CompanyOnboardingFormProps {
   onClose: () => void;
+  onSubmit: (company: CompanyOnboarding) => Promise<void> | void;
 }
 
-const CompanyOnboardingForm: React.FC<CompanyOnboardingFormProps> = ({ onClose }) => {
-  const [formData, setFormData] = useState<CompanyOnboarding>({
-    name: '',
-    logo: '',
-    description: '',
-    industry: '',
-    location: '',
-    packageOffered: '',
-    totalPositions: 0,
-    requirements: [''],
-    applicationDeadline: '',
-    rounds: [{ name: '', description: '', date: '' }],
-    recruiterEmail: '',
-    recruiterName: '',
-  });
+const initialState: CompanyOnboarding = {
+  name: '',
+  logo: '',
+  description: '',
+  industry: '',
+  location: '',
+  packageOffered: '',
+  totalPositions: 1,
+  requirements: [''],
+  applicationDeadline: '',
+  rounds: [{ name: '', description: '', date: '' }],
+  recruiterEmail: '',
+  recruiterName: '',
+};
 
-  const [errors, setErrors] = useState<Partial<CompanyOnboarding>>({});
+const CompanyOnboardingForm: React.FC<CompanyOnboardingFormProps> = ({
+  onClose,
+  onSubmit,
+}) => {
+  const [formData, setFormData] = useState<CompanyOnboarding>(initialState);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  const addRequirement = () => {
-    setFormData(prev => ({
-      ...prev,
-      requirements: [...prev.requirements, ''],
+  const handleChange = (
+    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = event.target;
+    setFormData((current) => ({
+      ...current,
+      [name]: name === 'totalPositions' ? Number(value) : value,
     }));
   };
 
   const updateRequirement = (index: number, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      requirements: prev.requirements.map((req, i) => i === index ? value : req),
-    }));
-  };
-
-  const removeRequirement = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      requirements: prev.requirements.filter((_, i) => i !== index),
-    }));
-  };
-
-  const addRound = () => {
-    setFormData(prev => ({
-      ...prev,
-      rounds: [...prev.rounds, { name: '', description: '', date: '' }],
-    }));
-  };
-
-  const updateRound = (index: number, field: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      rounds: prev.rounds.map((round, i) => 
-        i === index ? { ...round, [field]: value } : round
+    setFormData((current) => ({
+      ...current,
+      requirements: current.requirements.map((entry, currentIndex) =>
+        currentIndex === index ? value : entry
       ),
     }));
   };
 
-  const removeRound = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      rounds: prev.rounds.filter((_, i) => i !== index),
+  const updateRound = (index: number, field: string, value: string) => {
+    setFormData((current) => ({
+      ...current,
+      rounds: current.rounds.map((round, currentIndex) =>
+        currentIndex === index ? { ...round, [field]: value } : round
+      ),
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Validation and submission logic here
-    console.log('Company onboarding data:', formData);
-    alert('Company onboarded successfully! Recruiter credentials will be sent via email.');
-    onClose();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+
+    try {
+      await onSubmit({
+        ...formData,
+        requirements: formData.requirements.filter(Boolean),
+        rounds: formData.rounds.filter((round) => round.name && round.date),
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg">
-      <div className="flex items-center justify-between p-6 border-b border-gray-200">
-        <div className="flex items-center space-x-3">
-          <Building2 className="h-6 w-6 text-blue-600" />
-          <h2 className="text-xl font-semibold text-gray-900">Onboard New Company</h2>
+    <div className="bg-white border border-slate-200 rounded-3xl shadow-sm">
+      <div className="flex items-center justify-between p-6 border-b border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center">
+            <Building2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">Onboard company</h2>
+            <p className="text-sm text-slate-500">
+              Create a company profile and assign recruiter ownership.
+            </p>
+          </div>
         </div>
         <button
           onClick={onClose}
-          className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          className="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center"
         >
-          <X className="h-5 w-5" />
+          <X className="w-4 h-4" />
         </button>
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 space-y-6">
-        {/* Company Information */}
-        <div>
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Company Information</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Company Name *</label>
-              <input
-                type="text"
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter company name"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Industry *</label>
-              <select
-                name="industry"
-                value={formData.industry}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">Select industry</option>
-                <option value="Technology">Technology</option>
-                <option value="Fintech">Fintech</option>
-                <option value="E-commerce">E-commerce</option>
-                <option value="Healthcare">Healthcare</option>
-                <option value="Finance">Finance</option>
-                <option value="Consulting">Consulting</option>
-                <option value="Manufacturing">Manufacturing</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Location *</label>
-              <input
-                type="text"
-                name="location"
-                value={formData.location}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="e.g., Bangalore, India"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Package Offered *</label>
-              <input
-                type="text"
-                name="packageOffered"
-                value={formData.packageOffered}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="e.g., ₹15-25 LPA"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Total Positions *</label>
-              <input
-                type="number"
-                name="totalPositions"
-                value={formData.totalPositions}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Number of positions"
-                min="1"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Application Deadline *</label>
-              <input
-                type="date"
-                name="applicationDeadline"
-                value={formData.applicationDeadline}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              />
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Company Description *</label>
-            <textarea
-              name="description"
-              value={formData.description}
-              onChange={handleChange}
-              rows={3}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Brief description of the company"
-              required
-            />
-          </div>
+        <div className="grid md:grid-cols-2 gap-4">
+          <Field label="Company name" name="name" value={formData.name} onChange={handleChange} required />
+          <Field label="Industry" name="industry" value={formData.industry} onChange={handleChange} required />
+          <Field label="Location" name="location" value={formData.location} onChange={handleChange} required />
+          <Field label="Package offered" name="packageOffered" value={formData.packageOffered} onChange={handleChange} required />
+          <Field label="Total positions" name="totalPositions" type="number" value={String(formData.totalPositions)} onChange={handleChange} required />
+          <Field label="Application deadline" name="applicationDeadline" type="date" value={formData.applicationDeadline} onChange={handleChange} required />
+          <Field label="Recruiter name" name="recruiterName" value={formData.recruiterName} onChange={handleChange} required />
+          <Field label="Recruiter email" name="recruiterEmail" type="email" value={formData.recruiterEmail} onChange={handleChange} required />
+          <Field label="Logo URL" name="logo" value={formData.logo} onChange={handleChange} />
         </div>
 
-        {/* Requirements */}
         <div>
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Requirements</h3>
+          <label className="block text-sm font-medium text-slate-700 mb-2">Description</label>
+          <textarea
+            name="description"
+            value={formData.description}
+            onChange={handleChange}
+            rows={4}
+            className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+            required
+          />
+        </div>
+
+        <section className="rounded-3xl border border-slate-200 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-slate-900">Requirements</h3>
+              <p className="text-sm text-slate-500">Add screening requirements for the role.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                setFormData((current) => ({
+                  ...current,
+                  requirements: [...current.requirements, ''],
+                }))
+              }
+              className="inline-flex items-center gap-2 text-sm text-blue-600"
+            >
+              <Plus className="w-4 h-4" />
+              Add
+            </button>
+          </div>
+
           <div className="space-y-3">
             {formData.requirements.map((requirement, index) => (
-              <div key={index} className="flex items-center space-x-3">
+              <div key={index} className="flex gap-3">
                 <input
-                  type="text"
                   value={requirement}
-                  onChange={(e) => updateRequirement(index, e.target.value)}
-                  className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter requirement"
+                  onChange={(event) => updateRequirement(index, event.target.value)}
+                  className="flex-1 rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+                  placeholder="Requirement"
                 />
                 {formData.requirements.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => removeRequirement(index)}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    onClick={() =>
+                      setFormData((current) => ({
+                        ...current,
+                        requirements: current.requirements.filter((_, currentIndex) => currentIndex !== index),
+                      }))
+                    }
+                    className="w-11 h-11 rounded-2xl border border-red-200 text-red-600 flex items-center justify-center"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 )}
               </div>
             ))}
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-slate-900">Recruitment rounds</h3>
+              <p className="text-sm text-slate-500">Define the company hiring stages.</p>
+            </div>
             <button
               type="button"
-              onClick={addRequirement}
-              className="flex items-center space-x-2 text-blue-600 hover:text-blue-800 transition-colors"
+              onClick={() =>
+                setFormData((current) => ({
+                  ...current,
+                  rounds: [...current.rounds, { name: '', description: '', date: '' }],
+                }))
+              }
+              className="inline-flex items-center gap-2 text-sm text-blue-600"
             >
-              <Plus className="h-4 w-4" />
-              <span>Add Requirement</span>
+              <Plus className="w-4 h-4" />
+              Add
             </button>
           </div>
-        </div>
 
-        {/* Recruitment Rounds */}
-        <div>
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Recruitment Rounds</h3>
           <div className="space-y-4">
             {formData.rounds.map((round, index) => (
-              <div key={index} className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-medium text-gray-900">Round {index + 1}</h4>
+              <div key={index} className="rounded-2xl border border-slate-200 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-700">Round {index + 1}</span>
                   {formData.rounds.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => removeRound(index)}
-                      className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                      onClick={() =>
+                        setFormData((current) => ({
+                          ...current,
+                          rounds: current.rounds.filter((_, currentIndex) => currentIndex !== index),
+                        }))
+                      }
+                      className="text-red-600"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   )}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input
-                    type="text"
+                <div className="grid md:grid-cols-2 gap-3">
+                  <Field
+                    label="Round name"
                     value={round.name}
-                    onChange={(e) => updateRound(index, 'name', e.target.value)}
-                    className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Round name"
+                    onChange={(event) => updateRound(index, 'name', event.target.value)}
                   />
-                  <input
+                  <Field
+                    label="Date"
                     type="date"
                     value={round.date}
-                    onChange={(e) => updateRound(index, 'date', e.target.value)}
-                    className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <input
-                    type="text"
-                    value={round.description}
-                    onChange={(e) => updateRound(index, 'description', e.target.value)}
-                    className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Round description"
+                    onChange={(event) => updateRound(index, 'date', event.target.value)}
                   />
                 </div>
+                <textarea
+                  value={round.description}
+                  onChange={(event) => updateRound(index, 'description', event.target.value)}
+                  rows={3}
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+                  placeholder="Describe the round"
+                />
               </div>
             ))}
-            <button
-              type="button"
-              onClick={addRound}
-              className="flex items-center space-x-2 text-blue-600 hover:text-blue-800 transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add Round</span>
-            </button>
           </div>
-        </div>
+        </section>
 
-        {/* Recruiter Information */}
-        <div>
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Recruiter Information</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Recruiter Name *</label>
-              <input
-                type="text"
-                name="recruiterName"
-                value={formData.recruiterName}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter recruiter name"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Recruiter Email *</label>
-              <input
-                type="email"
-                name="recruiterEmail"
-                value={formData.recruiterEmail}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="recruiter@company.com"
-                required
-              />
-            </div>
-          </div>
-          <p className="text-sm text-gray-500 mt-2">
-            Login credentials will be automatically generated and sent to the recruiter's email.
-          </p>
-        </div>
-
-        {/* Submit Buttons */}
-        <div className="flex space-x-4 pt-6 border-t border-gray-200">
+        <div className="flex justify-end gap-3">
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 px-6 rounded-lg font-medium transition-colors"
+            className="px-5 py-3 rounded-2xl border border-slate-200 text-slate-700"
           >
             Cancel
           </button>
           <button
             type="submit"
-            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-lg font-medium transition-colors"
+            disabled={isSubmitting}
+            className="px-5 py-3 rounded-2xl bg-blue-600 text-white font-semibold disabled:opacity-60"
           >
-            Onboard Company
+            {isSubmitting ? 'Creating...' : 'Create company'}
           </button>
         </div>
       </form>
     </div>
   );
 };
+
+interface FieldProps {
+  label: string;
+  name?: string;
+  value: string;
+  onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  type?: string;
+  required?: boolean;
+}
+
+const Field: React.FC<FieldProps> = ({
+  label,
+  name,
+  value,
+  onChange,
+  type = 'text',
+  required = false,
+}) => (
+  <div>
+    <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
+    <input
+      name={name}
+      type={type}
+      value={value}
+      onChange={onChange}
+      className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+      required={required}
+    />
+  </div>
+);
 
 export default CompanyOnboardingForm;

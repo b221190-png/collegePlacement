@@ -6,7 +6,7 @@ export const TestAuth: React.FC = () => {
 
   const handleTestLogin = async () => {
     try {
-      await login('test@test.com', 'password123');
+      await login('admin@collegeplacement.com', 'admin123');
     } catch (err) {
       console.error('Test login failed:', err);
     }

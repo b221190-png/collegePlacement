@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { UserPlus, User, ArrowLeft } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { ArrowLeft, Building2, Shield, User } from 'lucide-react';
 import { LoginForm } from './LoginForm';
 import { RegistrationForm } from './RegistrationForm';
 
@@ -7,167 +7,147 @@ interface AuthWrapperProps {
   onSuccess?: () => void;
 }
 
+type Role = 'admin' | 'student' | 'recruiter';
+
+const ROLE_CREDENTIALS: Record<Role, { email: string; password: string }> = {
+  admin: { email: 'admin@collegeplacement.com', password: 'admin123' },
+  student: { email: 'arjun.sharma@college.edu', password: 'student123' },
+  recruiter: { email: 'recruiter@google.com', password: 'recruiter123' },
+};
+
 export const AuthWrapper: React.FC<AuthWrapperProps> = ({ onSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
-  const [userRole, setUserRole] = useState<'admin' | 'student' | null>(null);
+  const [userRole, setUserRole] = useState<Role | null>(null);
 
-  // Fixed admin email as requested
-  const fixedAdminEmail = 'admin@collegeplacement.com';
-
-  const handleSwitchMode = () => {
-    setIsLogin(!isLogin);
-  };
-
-  const handleRoleChange = (role: 'admin' | 'student') => {
-    setUserRole(role);
-    setIsLogin(true); // Always start with login mode when switching roles
-  };
-
-  const handleBackToRoleSelection = () => {
-    setIsLogin(true);
-    setUserRole('student');
-  };
+  const roleCards = useMemo(
+    () => [
+      {
+        id: 'student' as const,
+        title: 'Student',
+        description: 'Apply to companies, track statuses, and manage your profile.',
+        icon: User,
+        accent: 'bg-blue-100 text-blue-700',
+      },
+      {
+        id: 'recruiter' as const,
+        title: 'Recruiter',
+        description: 'Review applicants, score candidates, and update hiring outcomes.',
+        icon: Building2,
+        accent: 'bg-slate-100 text-slate-700',
+      },
+      {
+        id: 'admin' as const,
+        title: 'Administrator',
+        description: 'Manage companies, students, opportunities, and application windows.',
+        icon: Shield,
+        accent: 'bg-emerald-100 text-emerald-700',
+      },
+    ],
+    []
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        {/* Role Selection Header */}
-        {!userRole && (
-          <div className="text-center mb-8">
-            <div className="mx-auto w-20 h-20 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-full flex items-center justify-center mb-4">
-              <User className="w-10 h-10 text-white" />
-            </div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-6">Welcome to College Placement Portal</h2>
-            <p className="text-gray-600 mb-8">Please select your role to continue</p>
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+      <div className="w-full max-w-5xl bg-white border border-slate-200 shadow-xl rounded-3xl overflow-hidden">
+        <div className="grid lg:grid-cols-[1.1fr_0.9fr]">
+          <section className="p-8 lg:p-12 bg-slate-900 text-white">
+            <p className="text-sm uppercase tracking-[0.3em] text-slate-300">College Placement</p>
+            <h1 className="text-3xl lg:text-4xl font-bold mt-3">Placement Management Portal</h1>
+            <p className="text-slate-300 mt-4 leading-7">
+              Sign in with your role-based account to manage hiring, applications, and campus opportunities.
+            </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <button
-                onClick={() => handleRoleChange('student')}
-                className="p-6 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
-              >
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <User className="w-8 h-8 text-blue-600" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Student</h3>
-                  <p className="text-sm text-gray-600">Apply for placements and track opportunities</p>
-                </div>
-              </button>
+            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4 mt-10">
+              {roleCards.map((card) => {
+                const Icon = card.icon;
+                const isSelected = userRole === card.id;
 
-              <button
-                onClick={() => handleRoleChange('admin')}
-                className="p-6 border-2 border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-colors"
-              >
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <User className="w-8 h-8 text-indigo-600" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Administrator</h3>
-                  <p className="text-sm text-gray-600">Manage placements and student data</p>
-                </div>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Admin Login (Fixed Email) */}
-        {userRole === 'admin' && isLogin && (
-          <div>
-            <div className="text-center mb-6">
-              <button
-                onClick={handleBackToRoleSelection}
-                className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Role Selection
-              </button>
-              <h2 className="text-2xl font-bold text-gray-900">Administrator Login</h2>
-              <p className="text-gray-600 mt-2">Sign in to admin dashboard</p>
-              <div className="mt-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-                <p className="text-sm text-indigo-700">
-                  <strong>Admin Email:</strong> {fixedAdminEmail}
-                </p>
-                <p className="text-xs text-indigo-600 mt-1">Use your admin password to login</p>
-              </div>
-            </div>
-            <LoginForm
-              onSuccess={onSuccess}
-              onClose={handleBackToRoleSelection}
-              fixedEmail={fixedAdminEmail}
-              role="admin"
-            />
-          </div>
-        )}
-
-        {/* Student Login */}
-        {userRole === 'student' && isLogin && (
-          <div>
-            <div className="text-center mb-6">
-              <button
-                onClick={handleBackToRoleSelection}
-                className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Role Selection
-              </button>
-              <h2 className="text-2xl font-bold text-gray-900">Student Login</h2>
-              <p className="text-gray-600 mt-2">Sign in to your placement account</p>
-            </div>
-            <LoginForm
-              onSuccess={onSuccess}
-              onClose={handleBackToRoleSelection}
-              role="student"
-            />
-          </div>
-        )}
-
-        {/* Student Registration */}
-        {userRole === 'student' && !isLogin && (
-          <div>
-            <div className="text-center mb-6">
-              <button
-                onClick={() => setIsLogin(true)}
-                className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Login
-              </button>
-              <h2 className="text-2xl font-bold text-gray-900">Student Registration</h2>
-              <p className="text-gray-600 mt-2">Create your placement account</p>
-            </div>
-            <RegistrationForm
-              onSuccess={onSuccess}
-              onClose={() => setIsLogin(true)}
-              defaultRole="student"
-              showRoleSelection={false}
-            />
-          </div>
-        )}
-
-        {/* Role Switcher for Login Mode */}
-        {userRole && isLogin && (
-          <div className="text-center mt-6 pt-6 border-t">
-            <div className="flex justify-center space-x-4 text-sm">
-              <button
-                onClick={() => handleRoleChange(userRole === 'admin' ? 'student' : 'admin')}
-                className="text-blue-600 hover:text-blue-500 font-medium"
-              >
-                Switch to {userRole === 'admin' ? 'Student' : 'Admin'} Login
-              </button>
-              {userRole === 'student' && (
-                <>
-                  <span className="text-gray-400">|</span>
+                return (
                   <button
-                    onClick={handleSwitchMode}
-                    className="text-blue-600 hover:text-blue-500 font-medium"
+                    key={card.id}
+                    onClick={() => {
+                      setUserRole(card.id);
+                      setIsLogin(true);
+                    }}
+                    className={`text-left rounded-2xl p-5 border transition-colors ${
+                      isSelected
+                        ? 'border-white/70 bg-white/15'
+                        : 'border-white/15 bg-white/[0.04] hover:bg-white/[0.08]'
+                    }`}
                   >
-                    Create Student Account
+                    <div className={`w-11 h-11 rounded-xl ${card.accent} flex items-center justify-center mb-4`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <h2 className="text-lg font-semibold">{card.title}</h2>
+                    <p className="text-sm text-slate-300 mt-2 leading-6">{card.description}</p>
                   </button>
-                </>
-              )}
+                );
+              })}
             </div>
-          </div>
-        )}
+          </section>
+
+          <section className="p-6 md:p-8 lg:p-10 bg-white">
+            {!userRole && (
+              <div className="h-full flex flex-col justify-center">
+                <h2 className="text-2xl font-semibold text-slate-900 mb-3">Choose a role</h2>
+                <p className="text-slate-600 leading-7">
+                  Select your role from the left to continue to the appropriate sign-in experience.
+                </p>
+              </div>
+            )}
+
+            {userRole && (
+              <>
+                <button
+                  onClick={() => setUserRole(null)}
+                  className="inline-flex items-center text-sm text-slate-500 hover:text-slate-900 mb-6"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back to roles
+                </button>
+
+                {isLogin ? (
+                  <LoginForm
+                    key={`login-${userRole}`}
+                    onSuccess={onSuccess}
+                    onClose={() => setIsLogin(false)}
+                    fixedEmail={userRole === 'admin' ? ROLE_CREDENTIALS.admin.email : undefined}
+                    prefillEmail={ROLE_CREDENTIALS[userRole].email}
+                    prefillPassword={ROLE_CREDENTIALS[userRole].password}
+                    role={userRole}
+                  />
+                ) : (
+                  <RegistrationForm
+                    onSuccess={onSuccess}
+                    onClose={() => setIsLogin(true)}
+                    defaultRole="student"
+                    showRoleSelection={false}
+                  />
+                )}
+
+                <div className="text-center mt-6 pt-6 border-t border-slate-200 text-sm text-slate-600">
+                  {userRole === 'student' ? (
+                    <>
+                      Need a student account?{' '}
+                      <button
+                        onClick={() => setIsLogin((current) => !current)}
+                        className="font-semibold text-blue-600 hover:text-blue-700"
+                      >
+                        {isLogin ? 'Create account' : 'Back to login'}
+                      </button>
+                    </>
+                  ) : (
+                    <span>
+                      {userRole === 'admin'
+                        ? 'Administrator sign-in uses the official admin email.'
+                        : 'Recruiter accounts are managed by administrators during company onboarding.'}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

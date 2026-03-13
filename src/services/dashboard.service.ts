@@ -1,23 +1,56 @@
-import api from '../utils/api';
+import {
+  getAdminStats,
+  getPlacementSnapshot,
+  getRecruiterStats,
+  getStudentStats,
+} from '../store/placementStore';
 
 export const dashboardService = {
   getAdminDashboard: async () => {
-    const response = await api.get('/dashboard/admin');
-    return response.data;
+    const snapshot = getPlacementSnapshot();
+
+    return {
+      success: true,
+      data: {
+        stats: getAdminStats(snapshot),
+      },
+    };
   },
 
   getRecruiterDashboard: async (companyId: string) => {
-    const response = await api.get(`/dashboard/recruiter/${companyId}`);
-    return response.data;
+    const snapshot = getPlacementSnapshot();
+
+    return {
+      success: true,
+      data: {
+        stats: getRecruiterStats(snapshot, companyId),
+      },
+    };
   },
 
   getStudentDashboard: async (studentId: string) => {
-    const response = await api.get(`/dashboard/student/${studentId}`);
-    return response.data;
+    const snapshot = getPlacementSnapshot();
+
+    return {
+      success: true,
+      data: {
+        stats: getStudentStats(snapshot, studentId),
+      },
+    };
   },
 
-  getOverallAnalytics: async (params?: any) => {
-    const response = await api.get('/dashboard/analytics/overall', { params });
-    return response.data;
+  getOverallAnalytics: async () => {
+    const snapshot = getPlacementSnapshot();
+    const adminStats = getAdminStats(snapshot);
+
+    return {
+      success: true,
+      data: {
+        ...adminStats,
+        placedStudents: snapshot.applications.filter(
+          (application) => application.status === 'selected'
+        ).length,
+      },
+    };
   },
 };
