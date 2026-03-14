@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   CheckCircle2,
@@ -8,68 +8,124 @@ import {
   Users,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import {
-  getApplicationsForCompany,
-  getCompanyByUser,
-  getPlacementSnapshot,
-  getRecruiterStats,
-  usePlacementStore,
-} from '../store/placementStore';
+import { applicationsService, companiesService } from '../services';
+import { handleApiError } from '../utils/api';
 
 type Tab = 'applications' | 'analytics';
+
+interface ApplicationViewModel {
+  id: string;
+  studentName: string;
+  studentRollNumber: string;
+  studentBranch: string;
+  skills: string[];
+  status: string;
+  score: number | null;
+}
+
+const RECRUITER_APPLICATION_FETCH_LIMIT = 100;
 
 const RecruiterDashboard: React.FC = () => {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
-  const applications = usePlacementStore((state) => state.applications);
-  const students = usePlacementStore((state) => state.students);
-  const companies = usePlacementStore((state) => state.companies);
-  const updateApplicationStatus = usePlacementStore(
-    (state) => state.updateApplicationStatus
-  );
-  const updateApplicationScore = usePlacementStore(
-    (state) => state.updateApplicationScore
-  );
-  const bulkUpdateApplications = usePlacementStore(
-    (state) => state.bulkUpdateApplications
-  );
 
   const [activeTab, setActiveTab] = useState<Tab>('applications');
+  const [companyName, setCompanyName] = useState('Recruiter Portal');
+  const [applications, setApplications] = useState<ApplicationViewModel[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedApplications, setSelectedApplications] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState('');
 
-  const snapshot = useMemo(
-    () => getPlacementSnapshot(),
-    [applications, companies, students]
-  );
-  const company = useMemo(() => getCompanyByUser(snapshot, user), [snapshot, user]);
-  const companyApplications = useMemo(
-    () => (company ? getApplicationsForCompany(snapshot, company.id) : []),
-    [snapshot, company]
-  );
-  const stats = useMemo(
-    () => (company ? getRecruiterStats(snapshot, company.id) : null),
-    [snapshot, company]
-  );
+  const mapApplication = (application: any): ApplicationViewModel => {
+    const rawSkills = application.formData?.skills;
+    const normalizedSkills = Array.isArray(rawSkills)
+      ? rawSkills
+      : typeof rawSkills === 'string'
+        ? rawSkills
+            .split(',')
+            .map((skill: string) => skill.trim())
+            .filter(Boolean)
+        : [];
+
+    return {
+      id: String(application._id),
+      studentName: String(application.studentId?.userId?.name || 'Student'),
+      studentRollNumber: String(application.studentId?.rollNumber || '-'),
+      studentBranch: String(application.studentId?.branch || '-'),
+      skills: normalizedSkills,
+      status: String(application.status || 'submitted'),
+      score: typeof application.score === 'number' ? application.score : null,
+    };
+  };
+
+  const loadData = async () => {
+    if (!user?.companyId) {
+      return;
+    }
+
+    try {
+      const [companyResponse, applicationsResponse] = await Promise.all([
+        companiesService.getCompany(user.companyId),
+        applicationsService.getApplications({
+          limit: RECRUITER_APPLICATION_FETCH_LIMIT,
+        }),
+      ]);
+
+      const company = companyResponse?.data?.company;
+      setCompanyName(company?.name || 'Recruiter Portal');
+
+      const list = (applicationsResponse?.data?.applications || []) as any[];
+      setApplications(list.map(mapApplication));
+    } catch (error) {
+      setStatusMessage(handleApiError(error));
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, [user?.companyId]);
 
   const filteredApplications = useMemo(() => {
     const search = searchTerm.toLowerCase();
-    return companyApplications.filter((application) => {
+    return applications.filter((application) => {
       const matchesSearch =
-        application.student?.name.toLowerCase().includes(search) ||
-        application.student?.rollNumber.toLowerCase().includes(search);
+        application.studentName.toLowerCase().includes(search) ||
+        application.studentRollNumber.toLowerCase().includes(search);
       const matchesStatus =
         statusFilter === 'all' || application.status === statusFilter;
-      return Boolean(matchesSearch) && matchesStatus;
+      return matchesSearch && matchesStatus;
     });
-  }, [companyApplications, searchTerm, statusFilter]);
+  }, [applications, searchTerm, statusFilter]);
+
+  const stats = useMemo(() => {
+    const totalApplications = applications.length;
+    const applicationsInReview = applications.filter((app) =>
+      ['submitted', 'under-review'].includes(app.status)
+    ).length;
+    const shortlistedApplications = applications.filter(
+      (app) => app.status === 'shortlisted'
+    ).length;
+    const scored = applications.filter((app) => typeof app.score === 'number');
+    const averageScore =
+      scored.length > 0
+        ? Number(
+            (scored.reduce((sum, app) => sum + Number(app.score), 0) / scored.length).toFixed(1)
+          )
+        : 0;
+
+    return {
+      totalApplications,
+      applicationsInReview,
+      shortlistedApplications,
+      averageScore,
+    };
+  }, [applications]);
 
   const analytics = useMemo(() => {
     const byBranch = filteredApplications.reduce<Record<string, number>>(
       (accumulator, application) => {
-        const branch = application.student?.branch || 'Unknown';
+        const branch = application.studentBranch || 'Unknown';
         accumulator[branch] = (accumulator[branch] || 0) + 1;
         return accumulator;
       },
@@ -94,8 +150,8 @@ const RecruiterDashboard: React.FC = () => {
     const csv = [
       ['Student', 'Roll Number', 'Status', 'Score'],
       ...rows.map((application) => [
-        application.student?.name || '',
-        application.student?.rollNumber || '',
+        application.studentName,
+        application.studentRollNumber,
         application.status,
         String(application.score ?? ''),
       ]),
@@ -107,18 +163,69 @@ const RecruiterDashboard: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${company?.name || 'applications'}-export.csv`;
+    anchor.download = `${companyName || 'applications'}-export.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
   };
 
-  if (!company || !stats) {
+  const updateScore = async (applicationId: string, score: number) => {
+    try {
+      await applicationsService.updateApplicationScore(applicationId, { score });
+      setApplications((current) =>
+        current.map((application) =>
+          application.id === applicationId ? { ...application, score } : application
+        )
+      );
+    } catch (error) {
+      setStatusMessage(handleApiError(error));
+    }
+  };
+
+  const updateStatus = async (applicationId: string, status: string, studentName: string) => {
+    try {
+      await applicationsService.updateApplicationStatus(applicationId, { status });
+      setApplications((current) =>
+        current.map((application) =>
+          application.id === applicationId ? { ...application, status } : application
+        )
+      );
+      setStatusMessage(`${studentName} is now ${status}.`);
+    } catch (error) {
+      setStatusMessage(handleApiError(error));
+    }
+  };
+
+  const bulkUpdateStatus = async (status: 'shortlisted' | 'rejected') => {
+    try {
+      await applicationsService.bulkUpdateApplications({
+        applicationIds: selectedApplications,
+        status,
+      });
+      setApplications((current) =>
+        current.map((application) =>
+          selectedApplications.includes(application.id)
+            ? { ...application, status }
+            : application
+        )
+      );
+      setSelectedApplications([]);
+      setStatusMessage(
+        status === 'shortlisted'
+          ? 'Selected applications were shortlisted.'
+          : 'Selected applications were rejected.'
+      );
+    } catch (error) {
+      setStatusMessage(handleApiError(error));
+    }
+  };
+
+  if (!user?.companyId) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
         <div className="rounded-3xl bg-white border border-slate-200 p-8 text-center max-w-lg">
           <h1 className="text-2xl font-semibold text-slate-900">Recruiter company not found</h1>
           <p className="text-slate-600 mt-3">
-            This recruiter account is not linked to a company. Contact an administrator to complete account setup.
+            This recruiter account is not linked to a company.
           </p>
           <button
             onClick={logout}
@@ -140,7 +247,7 @@ const RecruiterDashboard: React.FC = () => {
               <p className="text-sm uppercase tracking-[0.25em] text-sky-200/70">
                 Recruiter Portal
               </p>
-              <h1 className="text-3xl font-bold mt-2">{company.name}</h1>
+              <h1 className="text-3xl font-bold mt-2">{companyName}</h1>
               <p className="text-slate-300 mt-2">
                 Review applicants, score candidates, and update hiring outcomes.
               </p>
@@ -222,21 +329,13 @@ const RecruiterDashboard: React.FC = () => {
                 {selectedApplications.length > 0 && (
                   <>
                     <button
-                      onClick={() => {
-                        bulkUpdateApplications(selectedApplications, 'shortlisted');
-                        setStatusMessage('Selected applications were shortlisted.');
-                        setSelectedApplications([]);
-                      }}
+                      onClick={() => void bulkUpdateStatus('shortlisted')}
                       className="px-4 py-3 rounded-2xl bg-emerald-600 text-white text-sm font-medium"
                     >
                       Shortlist
                     </button>
                     <button
-                      onClick={() => {
-                        bulkUpdateApplications(selectedApplications, 'rejected');
-                        setStatusMessage('Selected applications were rejected.');
-                        setSelectedApplications([]);
-                      }}
+                      onClick={() => void bulkUpdateStatus('rejected')}
                       className="px-4 py-3 rounded-2xl bg-rose-600 text-white text-sm font-medium"
                     >
                       Reject
@@ -302,16 +401,16 @@ const RecruiterDashboard: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 text-sm">
                           <div className="font-medium text-slate-900">
-                            {application.student?.name}
+                            {application.studentName}
                           </div>
-                          <div className="text-slate-500">{application.student?.rollNumber}</div>
+                          <div className="text-slate-500">{application.studentRollNumber}</div>
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-700">
-                          {application.student?.branch}
+                          {application.studentBranch}
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-700">
                           <div className="flex flex-wrap gap-2">
-                            {application.student?.skills.slice(0, 3).map((skill) => (
+                            {application.skills.slice(0, 3).map((skill) => (
                               <span
                                 key={skill}
                                 className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700"
@@ -329,7 +428,7 @@ const RecruiterDashboard: React.FC = () => {
                             value={application.score ?? ''}
                             onChange={(event) => {
                               const value = Number(event.target.value);
-                              updateApplicationScore(application.id, value);
+                              void updateScore(application.id, value);
                             }}
                             className="w-24 rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-slate-900"
                           />
@@ -338,12 +437,10 @@ const RecruiterDashboard: React.FC = () => {
                           <select
                             value={application.status}
                             onChange={(event) => {
-                              updateApplicationStatus(
+                              void updateStatus(
                                 application.id,
-                                event.target.value as typeof application.status
-                              );
-                              setStatusMessage(
-                                `${application.student?.name} is now ${event.target.value}.`
+                                event.target.value,
+                                application.studentName
                               );
                             }}
                             className="rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-slate-900"
@@ -393,13 +490,13 @@ const RecruiterDashboard: React.FC = () => {
                 <div>
                   <div className="text-lg font-semibold text-slate-900">Top candidates</div>
                   <div className="text-sm text-slate-500 mt-1">
-                    Highest-scoring candidates currently in your local pipeline.
+                    Highest-scoring candidates currently in your pipeline.
                   </div>
                 </div>
               </div>
 
               <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4 mt-6">
-                {companyApplications
+                {applications
                   .filter((application) => typeof application.score === 'number')
                   .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
                   .slice(0, 6)
@@ -409,10 +506,10 @@ const RecruiterDashboard: React.FC = () => {
                       className="rounded-2xl border border-slate-200 p-4"
                     >
                       <div className="font-semibold text-slate-900">
-                        {application.student?.name}
+                        {application.studentName}
                       </div>
                       <div className="text-sm text-slate-500 mt-1">
-                        {application.student?.rollNumber} · {application.student?.branch}
+                        {application.studentRollNumber} · {application.studentBranch}
                       </div>
                       <div className="text-sm text-slate-700 mt-3">
                         Score {application.score}

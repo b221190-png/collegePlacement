@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Building2,
   Calendar,
@@ -7,7 +7,6 @@ import {
   GraduationCap,
   LogOut,
   Plus,
-  RotateCcw,
   Upload,
 } from 'lucide-react';
 import CompanyOnboardingForm from './CompanyOnboardingForm';
@@ -15,46 +14,242 @@ import StudentBulkUpload from './StudentBulkUpload';
 import ApplicationWindow from './ApplicationWindow';
 import { useAuthStore } from '../store/authStore';
 import {
-  ApplicationRecord,
-  CompanyRecord,
-  OffCampusRecord,
-  StudentRecord,
-  getAdminStats,
-  usePlacementStore,
-} from '../store/placementStore';
+  applicationWindowsService,
+  applicationsService,
+  companiesService,
+  offCampusService,
+  studentsService,
+} from '../services';
+import { CompanyOnboarding } from '../types';
+import { handleApiError } from '../utils/api';
 
 type Tab = 'overview' | 'companies' | 'students' | 'applications' | 'offcampus';
 
-const AdminDashboard: React.FC = () => {
-  const user = useAuthStore((state) => state.user);
-  const logout = useAuthStore((state) => state.logout);
-  const companies = usePlacementStore((state) => state.companies);
-  const students = usePlacementStore((state) => state.students);
-  const applications = usePlacementStore((state) => state.applications);
-  const offCampusOpportunities = usePlacementStore(
-    (state) => state.offCampusOpportunities
-  );
-  const createCompany = usePlacementStore((state) => state.createCompany);
-  const configureApplicationWindow = usePlacementStore(
-    (state) => state.configureApplicationWindow
-  );
-  const bulkImportStudents = usePlacementStore((state) => state.bulkImportStudents);
-  const createOffCampusOpportunity = usePlacementStore(
-    (state) => state.createOffCampusOpportunity
-  );
-  const resetDemoData = usePlacementStore((state) => state.resetDemoData);
+interface ApiCompany {
+  _id: string;
+  name: string;
+  industry: string;
+  status: string;
+  applicationDeadline: string;
+  location: string;
+  packageOffered: string;
+  totalPositions: number;
+  requirements?: string[];
+  createdBy?: {
+    name?: string;
+  };
+  contactEmail?: string;
+  recruiter?: {
+    name?: string;
+    email?: string;
+  } | null;
+}
 
+interface ApiStudent {
+  _id: string;
+  rollNumber: string;
+  branch: string;
+  cgpa: number;
+  batch: number;
+  skills?: string[];
+  userId?: {
+    name?: string;
+    email?: string;
+  };
+}
+
+interface ApiApplication {
+  _id: string;
+  status: string;
+  score?: number | null;
+  submittedAt: string;
+  studentId?: {
+    _id?: string;
+    rollNumber?: string;
+    userId?: {
+      name?: string;
+    };
+  };
+  companyId?: {
+    _id?: string;
+    name?: string;
+  };
+}
+
+interface ApiOffCampus {
+  _id: string;
+  title: string;
+  company: string;
+  type: string;
+  location: string;
+  description: string;
+  skills?: string[];
+  applicationDeadline: string;
+  applicationLink: string;
+}
+
+interface CompanyViewModel {
+  id: string;
+  name: string;
+  industry: string;
+  status: string;
+  applicationDeadline: string;
+  location: string;
+  packageOffered: string;
+  totalPositions: number;
+  requirements: string[];
+  recruiterName: string;
+  recruiterEmail: string;
+}
+
+interface StudentViewModel {
+  id: string;
+  name: string;
+  email: string;
+  rollNumber: string;
+  branch: string;
+  cgpa: number;
+  batch: number;
+  skills: string[];
+}
+
+interface ApplicationViewModel {
+  id: string;
+  studentId: string;
+  companyId: string;
+  studentName: string;
+  studentRollNumber: string;
+  companyName: string;
+  status: string;
+  score: number | null;
+  submittedAt: string;
+}
+
+interface OffCampusViewModel {
+  id: string;
+  title: string;
+  company: string;
+  type: string;
+  location: string;
+  description: string;
+  skills: string[];
+  applicationDeadline: string;
+  applicationLink: string;
+}
+
+const toDateTimeLocalValue = (date: Date) => {
+  const next = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return next.toISOString().slice(0, 16);
+};
+
+const INDUSTRIES = [
+  'Information Technology',
+  'Software Development',
+  'Consulting',
+  'Banking and Finance',
+  'Manufacturing',
+  'Healthcare',
+  'Education',
+  'E-commerce',
+  'Telecommunications',
+  'Automotive',
+  'Marketing',
+  'Design',
+  'Other',
+];
+
+const BRANCHES = [
+  'Computer Science',
+  'Information Technology',
+  'Electronics and Communication',
+  'Electrical Engineering',
+  'Mechanical Engineering',
+  'Civil Engineering',
+  'Chemical Engineering',
+  'Biotechnology',
+  'Other',
+];
+
+const normalizeIndustry = (value: string) => {
+  if (INDUSTRIES.includes(value)) {
+    return value;
+  }
+  return 'Other';
+};
+
+const normalizeBranch = (value: string) => {
+  if (BRANCHES.includes(value)) {
+    return value;
+  }
+  return 'Other';
+};
+
+const mapCompany = (company: ApiCompany): CompanyViewModel => ({
+  id: company._id,
+  name: company.name,
+  industry: company.industry,
+  status: company.status,
+  applicationDeadline: company.applicationDeadline,
+  location: company.location,
+  packageOffered: company.packageOffered,
+  totalPositions: company.totalPositions,
+  requirements: company.requirements || [],
+  recruiterName: company.recruiter?.name || 'Not assigned',
+  recruiterEmail: company.recruiter?.email || company.contactEmail || 'Not provided',
+});
+
+const mapStudent = (student: ApiStudent): StudentViewModel => ({
+  id: student._id,
+  name: student.userId?.name || 'Student',
+  email: student.userId?.email || '-',
+  rollNumber: student.rollNumber,
+  branch: student.branch,
+  cgpa: Number(student.cgpa || 0),
+  batch: Number(student.batch || 0),
+  skills: student.skills || [],
+});
+
+const mapApplication = (application: ApiApplication): ApplicationViewModel => ({
+  id: application._id,
+  studentId: application.studentId?._id || '',
+  companyId: application.companyId?._id || '',
+  studentName: application.studentId?.userId?.name || 'Student',
+  studentRollNumber: application.studentId?.rollNumber || '-',
+  companyName: application.companyId?.name || '-',
+  status: application.status,
+  score: typeof application.score === 'number' ? application.score : null,
+  submittedAt: application.submittedAt,
+});
+
+const mapOffCampus = (opportunity: ApiOffCampus): OffCampusViewModel => ({
+  id: opportunity._id,
+  title: opportunity.title,
+  company: opportunity.company,
+  type: opportunity.type,
+  location: opportunity.location,
+  description: opportunity.description,
+  skills: opportunity.skills || [],
+  applicationDeadline: opportunity.applicationDeadline,
+  applicationLink: opportunity.applicationLink,
+});
+
+const DASHBOARD_FETCH_LIMIT = 100;
+
+const AdminDashboard: React.FC = () => {
+  const logout = useAuthStore((state) => state.logout);
+  const minimumOpportunityDeadline = toDateTimeLocalValue(new Date(Date.now() + 60 * 60 * 1000));
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [showCompanyForm, setShowCompanyForm] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [showWindowForm, setShowWindowForm] = useState(false);
   const [showOpportunityForm, setShowOpportunityForm] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
-  const [recruiterCredentials, setRecruiterCredentials] = useState<{
-    email: string;
-    password: string;
-    name: string;
-  } | null>(null);
+
+  const [companies, setCompanies] = useState<CompanyViewModel[]>([]);
+  const [students, setStudents] = useState<StudentViewModel[]>([]);
+  const [applications, setApplications] = useState<ApplicationViewModel[]>([]);
+  const [offCampusOpportunities, setOffCampusOpportunities] = useState<OffCampusViewModel[]>([]);
+
   const [opportunityForm, setOpportunityForm] = useState({
     title: '',
     company: '',
@@ -65,55 +260,74 @@ const AdminDashboard: React.FC = () => {
     applicationDeadline: '',
     salary: '',
     applicationLink: 'https://example.com/apply',
-    industry: 'Technology',
+    industry: 'Information Technology',
     experience: 'any',
     isRemote: false,
   });
 
-  const stats = useMemo(
-    () =>
-      getAdminStats({
-        users: [],
-        students,
-        companies,
-        applications,
-        offCampusOpportunities,
-      }),
-    [applications, companies, offCampusOpportunities, students]
-  );
+  const stats = useMemo(() => {
+    const openCompanies = companies.filter((company) => company.status === 'active').length;
+    const pendingApplications = applications.filter((application) =>
+      ['submitted', 'under-review'].includes(application.status)
+    ).length;
 
-  const applicationRows = useMemo(
-    () =>
-      applications.map((application) => ({
-        ...application,
-        student: students.find((student) => student.id === application.studentId) || null,
-        company: companies.find((company) => company.id === application.companyId) || null,
-      })),
-    [applications, companies, students]
-  );
+    return {
+      totalCompanies: companies.length,
+      activeCompanies: openCompanies,
+      totalStudents: students.length,
+      totalApplications: applications.length,
+      pendingApplications,
+    };
+  }, [applications, companies, students]);
 
-  const handleReset = () => {
-    resetDemoData();
-    setRecruiterCredentials(null);
-    setStatusMessage('Demo data reset to the original local seed.');
+  const loadCompanies = async () => {
+    const response = await companiesService.getCompanies({ limit: DASHBOARD_FETCH_LIMIT });
+    const companyList = (response?.data?.companies || []) as ApiCompany[];
+    setCompanies(companyList.map(mapCompany));
   };
 
+  const loadStudents = async () => {
+    const response = await studentsService.getStudents({ limit: DASHBOARD_FETCH_LIMIT });
+    const studentList = (response?.data?.students || []) as ApiStudent[];
+    setStudents(studentList.map(mapStudent));
+  };
+
+  const loadApplications = async () => {
+    const response = await applicationsService.getApplications({ limit: DASHBOARD_FETCH_LIMIT });
+    const applicationList = (response?.data?.applications || []) as ApiApplication[];
+    setApplications(applicationList.map(mapApplication));
+  };
+
+  const loadOffCampus = async () => {
+    const response = await offCampusService.getOpportunities({ limit: DASHBOARD_FETCH_LIMIT });
+    const opportunities = (response?.data?.opportunities || []) as ApiOffCampus[];
+    setOffCampusOpportunities(opportunities.map(mapOffCampus));
+  };
+
+  const loadDashboardData = async () => {
+    try {
+      await Promise.all([
+        loadCompanies(),
+        loadStudents(),
+        loadApplications(),
+        loadOffCampus(),
+      ]);
+    } catch (error) {
+      setStatusMessage(handleApiError(error));
+    }
+  };
+
+  useEffect(() => {
+    void loadDashboardData();
+  }, []);
+
   const handleExportStudents = () => {
-    const header = [
-      'Name',
-      'Roll Number',
-      'Email',
-      'Phone',
-      'Branch',
-      'CGPA',
-      'Batch',
-      'Skills',
-    ];
+    const header = ['Name', 'Roll Number', 'Email', 'Phone', 'Branch', 'CGPA', 'Batch', 'Skills'];
     const rows = students.map((student) => [
       student.name,
       student.rollNumber,
       student.email,
-      student.phone,
+      '-',
       student.branch,
       String(student.cgpa),
       String(student.batch),
@@ -132,47 +346,157 @@ const AdminDashboard: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleCompanyCreate = async (companyData: CompanyOnboarding) => {
+    try {
+      const payload = {
+        name: companyData.name,
+        description: companyData.description,
+        industry: normalizeIndustry(companyData.industry),
+        location: companyData.location,
+        packageOffered: companyData.packageOffered,
+        totalPositions: Number(companyData.totalPositions || 1),
+        applicationDeadline: companyData.applicationDeadline,
+        requirements: companyData.requirements.filter(Boolean),
+        skills: companyData.requirements.filter(Boolean).slice(0, 6),
+        recruitmentProcess: companyData.rounds
+          .filter((round) => round.name)
+          .map((round) => ({
+            roundName: round.name,
+            description: round.description,
+            duration: 'TBD',
+          })),
+        contactEmail: companyData.recruiterEmail,
+        recruiterName: companyData.recruiterName,
+        recruiterEmail: companyData.recruiterEmail,
+      };
+
+      const response = await companiesService.createCompany(payload);
+      const recruiter = response?.data?.recruiter;
+      const temporaryPassword = response?.data?.temporaryPassword;
+
+      setStatusMessage(
+        recruiter?.isNew && temporaryPassword
+          ? `Company added successfully. Recruiter login: ${recruiter.email} / ${temporaryPassword}`
+          : 'Company added successfully.'
+      );
+      setShowCompanyForm(false);
+      await loadCompanies();
+    } catch (error) {
+      setStatusMessage(handleApiError(error));
+    }
+  };
+
+  const handleStudentImport = async (rows: Array<{
+    name: string;
+    rollNumber: string;
+    email: string;
+    phone: string;
+    branch: string;
+    cgpa: number;
+    skills: string[];
+    batch?: number;
+  }>) => {
+    let addedCount = 0;
+    let skippedCount = 0;
+
+    await Promise.all(
+      rows.map(async (row) => {
+        try {
+          await studentsService.createStudent({
+            name: row.name,
+            email: row.email,
+            password: 'student123',
+            rollNumber: row.rollNumber,
+            branch: normalizeBranch(row.branch),
+            cgpa: Number(row.cgpa),
+            phone: row.phone,
+            batch: Number(row.batch || new Date().getFullYear()),
+            skills: row.skills || [],
+          });
+          addedCount += 1;
+        } catch {
+          skippedCount += 1;
+        }
+      })
+    );
+
+    await loadStudents();
+    return { addedCount, skippedCount };
+  };
+
+  const handleWindowCreate = async (payload: {
+    companyId: string;
+    startDate: string;
+    endDate: string;
+    startTime: string;
+    endTime: string;
+    minCGPA?: number;
+    branches: string[];
+    maxBacklogs?: number;
+  }) => {
+    try {
+      await applicationWindowsService.createWindow({
+        companyId: payload.companyId,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        startTime: payload.startTime,
+        endTime: payload.endTime,
+        minCGPA: payload.minCGPA,
+        maxBacklogs: payload.maxBacklogs,
+        eligibleBranches: payload.branches,
+      });
+      setStatusMessage('Application window created successfully.');
+      setShowWindowForm(false);
+    } catch (error) {
+      setStatusMessage(handleApiError(error));
+    }
+  };
+
   const handleCreateOpportunity = async (event: React.FormEvent) => {
     event.preventDefault();
-    createOffCampusOpportunity({
-      title: opportunityForm.title,
-      company: opportunityForm.company,
-      companyLogo:
-        'https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=100',
-      type: opportunityForm.type as OffCampusRecord['type'],
-      location: opportunityForm.location,
-      isRemote: opportunityForm.isRemote,
-      description: opportunityForm.description,
-      skills: opportunityForm.skills
-        .split(',')
-        .map((skill) => skill.trim())
-        .filter(Boolean),
-      requirements: opportunityForm.skills
-        .split(',')
-        .map((skill) => `Working knowledge of ${skill.trim()}`)
-        .filter((value) => value !== 'Working knowledge of '),
-      applicationDeadline: opportunityForm.applicationDeadline,
-      applicationLink: opportunityForm.applicationLink,
-      industry: opportunityForm.industry,
-      experience: opportunityForm.experience as OffCampusRecord['experience'],
-      salary: opportunityForm.salary || undefined,
-    }, user?.id);
-    setStatusMessage('Off-campus opportunity created successfully.');
-    setShowOpportunityForm(false);
-    setOpportunityForm({
-      title: '',
-      company: '',
-      location: '',
-      type: 'full-time',
-      description: '',
-      skills: '',
-      applicationDeadline: '',
-      salary: '',
-      applicationLink: 'https://example.com/apply',
-      industry: 'Technology',
-      experience: 'any',
-      isRemote: false,
-    });
+    try {
+      await offCampusService.createOpportunity({
+        title: opportunityForm.title,
+        company: opportunityForm.company,
+        type: opportunityForm.type,
+        location: opportunityForm.location,
+        isRemote: opportunityForm.isRemote,
+        description: opportunityForm.description,
+        skills: opportunityForm.skills
+          .split(',')
+          .map((skill) => skill.trim())
+          .filter(Boolean),
+        requirements: opportunityForm.skills
+          .split(',')
+          .map((skill) => `Working knowledge of ${skill.trim()}`)
+          .filter((value) => value !== 'Working knowledge of '),
+        applicationDeadline: opportunityForm.applicationDeadline,
+        applicationLink: opportunityForm.applicationLink,
+        industry: normalizeIndustry(opportunityForm.industry),
+        experience: opportunityForm.experience,
+        salary: opportunityForm.salary || undefined,
+      });
+
+      setStatusMessage('Off-campus opportunity created successfully.');
+      setShowOpportunityForm(false);
+      setOpportunityForm({
+        title: '',
+        company: '',
+        location: '',
+        type: 'full-time',
+        description: '',
+        skills: '',
+        applicationDeadline: '',
+        salary: '',
+        applicationLink: 'https://example.com/apply',
+        industry: 'Information Technology',
+        experience: 'any',
+        isRemote: false,
+      });
+      await loadOffCampus();
+    } catch (error) {
+      setStatusMessage(handleApiError(error));
+    }
   };
 
   return (
@@ -186,26 +510,17 @@ const AdminDashboard: React.FC = () => {
               </p>
               <h1 className="text-3xl font-bold mt-2">College placement control room</h1>
               <p className="text-slate-300 mt-2">
-                Create companies, import students, and manage placement operations.
+                Manage companies, students, applications, and opportunities.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={handleReset}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white/10 hover:bg-white/15 text-sm"
-              >
-                <RotateCcw className="w-4 h-4" />
-                Reset data
-              </button>
-              <button
-                onClick={logout}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white text-slate-900 text-sm font-medium"
-              >
-                <LogOut className="w-4 h-4" />
-                Logout
-              </button>
-            </div>
+            <button
+              onClick={logout}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white text-slate-900 text-sm font-medium self-start"
+            >
+              <LogOut className="w-4 h-4" />
+              Logout
+            </button>
           </div>
 
           <div className="mt-6 flex flex-wrap gap-3">
@@ -241,16 +556,6 @@ const AdminDashboard: React.FC = () => {
           </div>
         )}
 
-        {recruiterCredentials && (
-          <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4">
-            <div className="font-semibold text-emerald-900">Recruiter account created</div>
-            <div className="text-sm text-emerald-800 mt-1">
-              {recruiterCredentials.name}: {recruiterCredentials.email} /{' '}
-              {recruiterCredentials.password}
-            </div>
-          </div>
-        )}
-
         <section className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <StatCard value={stats.totalCompanies} label="Companies" color="text-blue-600" />
           <StatCard value={stats.activeCompanies} label="Open roles" color="text-emerald-600" />
@@ -262,27 +567,27 @@ const AdminDashboard: React.FC = () => {
         {activeTab === 'overview' && (
           <div className="grid lg:grid-cols-[1.25fr_0.75fr] gap-6">
             <div className="rounded-3xl bg-white border border-slate-200 p-6">
-              <h2 className="text-xl font-semibold text-slate-900">What works offline</h2>
+              <h2 className="text-xl font-semibold text-slate-900">Operations</h2>
               <div className="grid md:grid-cols-2 gap-4 mt-5">
                 <FeatureCard
                   icon={<Building2 className="w-5 h-5" />}
                   title="Company onboarding"
-                  description="New companies create persistent recruiter accounts with stored credentials."
+                  description="Create companies and set hiring process details."
                 />
                 <FeatureCard
                   icon={<Upload className="w-5 h-5" />}
                   title="Student imports"
-                  description="CSV imports create local student accounts that survive refreshes."
+                  description="Bulk create student accounts from CSV uploads."
                 />
                 <FeatureCard
                   icon={<Calendar className="w-5 h-5" />}
                   title="Application windows"
-                  description="Eligibility rules and windows are stored against each company."
+                  description="Configure eligibility and drive timeline."
                 />
                 <FeatureCard
                   icon={<FileText className="w-5 h-5" />}
-                  title="Recruiter reviews"
-                  description="Scores and status changes update instantly for student and recruiter views."
+                  title="Application tracking"
+                  description="View status and score updates across all applications."
                 />
               </div>
             </div>
@@ -295,7 +600,7 @@ const AdminDashboard: React.FC = () => {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <div className="font-semibold text-slate-900">{company.name}</div>
-                        <div className="text-sm text-slate-500">{company.recruiterEmail}</div>
+                        <div className="text-sm text-slate-500">{company.recruiterName}</div>
                       </div>
                       <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
                         {company.status}
@@ -314,7 +619,7 @@ const AdminDashboard: React.FC = () => {
               <div>
                 <h2 className="text-xl font-semibold text-slate-900">Company management</h2>
                 <p className="text-sm text-slate-500 mt-1">
-                  All company and recruiter records live entirely in the browser.
+                  Manage company records using backend APIs.
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -338,12 +643,7 @@ const AdminDashboard: React.FC = () => {
             {showCompanyForm && (
               <CompanyOnboardingForm
                 onClose={() => setShowCompanyForm(false)}
-                onSubmit={async (companyData) => {
-                  const result = createCompany(companyData);
-                  setRecruiterCredentials(result.recruiter);
-                  setStatusMessage(`${result.company.name} was added to the local company list.`);
-                  setShowCompanyForm(false);
-                }}
+                onSubmit={handleCompanyCreate}
               />
             )}
 
@@ -354,11 +654,7 @@ const AdminDashboard: React.FC = () => {
                   name: company.name,
                 }))}
                 onClose={() => setShowWindowForm(false)}
-                onSubmit={async (payload) => {
-                  const company = configureApplicationWindow(payload);
-                  setStatusMessage(`Application window updated for ${company.name}.`);
-                  setShowWindowForm(false);
-                }}
+                onSubmit={handleWindowCreate}
               />
             )}
 
@@ -368,8 +664,7 @@ const AdminDashboard: React.FC = () => {
                   key={company.id}
                   company={company}
                   applicationCount={
-                    applications.filter((application) => application.companyId === company.id)
-                      .length
+                    applications.filter((application) => application.companyId === company.id).length
                   }
                 />
               ))}
@@ -383,7 +678,7 @@ const AdminDashboard: React.FC = () => {
               <div>
                 <h2 className="text-xl font-semibold text-slate-900">Student registry</h2>
                 <p className="text-sm text-slate-500 mt-1">
-                  Imported students automatically get local login access with `student123`.
+                  Import students and manage records from backend data.
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -408,9 +703,9 @@ const AdminDashboard: React.FC = () => {
               <StudentBulkUpload
                 onClose={() => setShowBulkUpload(false)}
                 onUpload={async (rows) => {
-                  const result = bulkImportStudents(rows);
+                  const result = await handleStudentImport(rows);
                   setStatusMessage(
-                    `Imported ${result.addedCount} students. ${result.skippedCount} duplicates were skipped.`
+                    `Imported ${result.addedCount} students. ${result.skippedCount} rows were skipped.`
                   );
                   return result;
                 }}
@@ -430,7 +725,7 @@ const AdminDashboard: React.FC = () => {
             <div className="p-6 border-b border-slate-200">
               <h2 className="text-xl font-semibold text-slate-900">Application ledger</h2>
               <p className="text-sm text-slate-500 mt-1">
-                Students create these records locally, recruiters update them locally, and admins can audit the full flow.
+                Monitor all application submissions and review outcomes.
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -448,15 +743,13 @@ const AdminDashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 bg-white">
-                  {applicationRows.map((application) => (
+                  {applications.map((application) => (
                     <tr key={application.id}>
                       <td className="px-6 py-4 text-sm">
-                        <div className="font-medium text-slate-900">{application.student?.name}</div>
-                        <div className="text-slate-500">{application.student?.rollNumber}</div>
+                        <div className="font-medium text-slate-900">{application.studentName}</div>
+                        <div className="text-slate-500">{application.studentRollNumber}</div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-slate-700">
-                        {application.company?.name}
-                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-700">{application.companyName}</td>
                       <td className="px-6 py-4 text-sm text-slate-700 capitalize">
                         {application.status}
                       </td>
@@ -480,7 +773,7 @@ const AdminDashboard: React.FC = () => {
               <div>
                 <h2 className="text-xl font-semibold text-slate-900">Off-campus opportunities</h2>
                 <p className="text-sm text-slate-500 mt-1">
-                  Students can track these locally from their dashboard.
+                  Publish and track off-campus opportunities.
                 </p>
               </div>
               <button
@@ -535,8 +828,9 @@ const AdminDashboard: React.FC = () => {
                 />
                 <Input
                   label="Deadline"
-                  type="date"
+                  type="datetime-local"
                   value={opportunityForm.applicationDeadline}
+                  min={minimumOpportunityDeadline}
                   onChange={(value) =>
                     setOpportunityForm((current) => ({
                       ...current,
@@ -687,7 +981,7 @@ const FeatureCard: React.FC<{
 );
 
 const CompanyAdminCard: React.FC<{
-  company: CompanyRecord;
+  company: CompanyViewModel;
   applicationCount: number;
 }> = ({ company, applicationCount }) => (
   <div className="rounded-3xl bg-white border border-slate-200 p-5">
@@ -700,16 +994,16 @@ const CompanyAdminCard: React.FC<{
         {company.status}
       </span>
     </div>
-    <div className="mt-4 space-y-2 text-sm text-slate-600">
+  <div className="mt-4 space-y-2 text-sm text-slate-600">
       <div>Recruiter: {company.recruiterName}</div>
-      <div>Email: {company.recruiterEmail}</div>
+      <div>Contact: {company.recruiterEmail}</div>
       <div>Applications: {applicationCount}</div>
       <div>Deadline: {new Date(company.applicationDeadline).toLocaleDateString()}</div>
     </div>
   </div>
 );
 
-const StudentCard: React.FC<{ student: StudentRecord }> = ({ student }) => (
+const StudentCard: React.FC<{ student: StudentViewModel }> = ({ student }) => (
   <div className="rounded-3xl bg-white border border-slate-200 p-5">
     <div className="flex items-start gap-4">
       <div className="w-12 h-12 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center shrink-0">
@@ -719,7 +1013,9 @@ const StudentCard: React.FC<{ student: StudentRecord }> = ({ student }) => (
         <div className="font-semibold text-slate-900">{student.name}</div>
         <div className="text-sm text-slate-500">{student.rollNumber}</div>
         <div className="text-sm text-slate-600 mt-3">{student.branch}</div>
-        <div className="text-sm text-slate-600">CGPA {student.cgpa.toFixed(1)} · Batch {student.batch}</div>
+        <div className="text-sm text-slate-600">
+          CGPA {student.cgpa.toFixed(1)} · Batch {student.batch}
+        </div>
       </div>
     </div>
     <div className="flex flex-wrap gap-2 mt-4">
@@ -738,13 +1034,15 @@ const Input: React.FC<{
   onChange: (value: string) => void;
   type?: string;
   helper?: string;
-}> = ({ label, value, onChange, type = 'text', helper }) => (
+  min?: string;
+}> = ({ label, value, onChange, type = 'text', helper, min }) => (
   <div>
     <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
     <input
       type={type}
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      min={min}
       className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
     />
     {helper && <p className="text-xs text-slate-500 mt-2">{helper}</p>}
