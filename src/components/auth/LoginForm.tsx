@@ -12,6 +12,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
+import { API_BASE_URL } from '../../utils/apiConfig';
 
 interface LoginFormData {
   email: string;
@@ -29,12 +30,6 @@ interface LoginFormProps {
   initialResetToken?: string;
   initialExternalError?: string;
 }
-
-const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-const NORMALIZED_API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '');
-const API_BASE_URL = NORMALIZED_API_BASE_URL.endsWith('/api')
-  ? NORMALIZED_API_BASE_URL
-  : `${NORMALIZED_API_BASE_URL}/api`;
 
 const ROLE_CONFIG = {
   admin: {

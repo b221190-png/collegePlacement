@@ -8,6 +8,7 @@ const { Readable } = require('stream');
 const Student = require('../models/Student');
 const User = require('../models/User');
 const Application = require('../models/Application');
+const { isCloudinaryConfigured, uploadResumeBuffer } = require('../utils/cloudinary');
 const { protect, authorize, studentAccess } = require('../middleware/auth');
 
 const router = express.Router();
@@ -20,8 +21,12 @@ const hasAtMostTwoDecimals = (value) => {
   return decimalPart.length <= 2;
 };
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
+const isServerlessRuntime = process.env.VERCEL === '1';
+const shouldStoreResumesInCloudinary =
+  isCloudinaryConfigured() && (isServerlessRuntime || process.env.NODE_ENV === 'production');
+
+// Configure multer for local resume uploads
+const localResumeStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadPath = process.env.UPLOAD_PATH || './uploads';
     if (!fs.existsSync(uploadPath)) {
@@ -53,10 +58,21 @@ const fileFilter = (req, file, cb) => {
 };
 
 const upload = multer({
-  storage,
+  storage:
+    shouldStoreResumesInCloudinary || isServerlessRuntime
+      ? multer.memoryStorage()
+      : localResumeStorage,
   fileFilter,
   limits: {
     fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024 // 10MB
+  }
+});
+
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter,
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE, 10) || 10 * 1024 * 1024
   }
 });
 
@@ -565,7 +581,7 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
 // @route   POST /api/students/bulk-upload
 // @desc    Bulk upload students via CSV (admin only)
 // @access  Private (Admin only)
-router.post('/bulk-upload', protect, authorize('admin'), upload.single('file'), async (req, res) => {
+router.post('/bulk-upload', protect, authorize('admin'), csvUpload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -684,10 +700,26 @@ router.post('/:id/upload-resume', protect, upload.single('resume'), async (req, 
       });
     }
 
-    // Update student with resume info
-    student.resumeUrl = `/uploads/${req.file.filename}`;
-    student.resumeOriginalName = req.file.originalname;
-    student.resumeFileSize = req.file.size;
+    if (isServerlessRuntime && !shouldStoreResumesInCloudinary) {
+      return res.status(500).json({
+        success: false,
+        message: 'Resume uploads require Cloudinary configuration in this environment'
+      });
+    }
+
+    if (shouldStoreResumesInCloudinary) {
+      const uploadResult = await uploadResumeBuffer(req.file, {
+        public_id: `${student.rollNumber}-${Date.now()}`
+      });
+
+      student.resumeUrl = uploadResult.secure_url;
+      student.resumeOriginalName = req.file.originalname;
+      student.resumeFileSize = req.file.size;
+    } else {
+      student.resumeUrl = `/uploads/${req.file.filename}`;
+      student.resumeOriginalName = req.file.originalname;
+      student.resumeFileSize = req.file.size;
+    }
 
     await student.save();
 

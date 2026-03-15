@@ -27,6 +27,24 @@ const recruiterRoutes = require('./routes/recruiter');
 const emailRoutes = require('./routes/email');
 
 const app = express();
+app.set('trust proxy', 1);
+
+const isTestEnvironment = process.env.NODE_ENV === 'test';
+const shouldSeedDefaultAccounts =
+  process.env.ENABLE_DEFAULT_ACCOUNTS === 'true' ||
+  (!process.env.VERCEL && process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test');
+
+const resolveProductionUrl = () => {
+  if (process.env.PRODUCTION_URL) {
+    return process.env.PRODUCTION_URL;
+  }
+
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return null;
+};
 
 // Security middleware
 app.use(helmet());
@@ -99,10 +117,6 @@ const swaggerOptions = {
       {
         url: `http://localhost:${process.env.PORT || 5000}`,
         description: 'Development server'
-      },
-      {
-        url: process.env.PRODUCTION_URL || 'https://pixora-backend-726038512757.us-central1.run.app',
-        description: 'Production server'
       }
     ],
     components: {
@@ -119,6 +133,14 @@ const swaggerOptions = {
   apis: ['./routes/*.js', './routes/*-swagger.js', './swagger-schemas.js']
 };
 
+const productionServerUrl = resolveProductionUrl();
+if (productionServerUrl) {
+  swaggerOptions.definition.servers.push({
+    url: productionServerUrl,
+    description: 'Production server'
+  });
+}
+
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 
 // Swagger UI route
@@ -134,40 +156,44 @@ app.get('/api-docs.json', (req, res) => {
 });
 
 // Database connection with better error handling
+let databaseConnectionPromise = null;
+
 const connectDB = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
+
+  if (databaseConnectionPromise) {
+    return databaseConnectionPromise;
+  }
+
   try {
     const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
     if (!mongoUri) {
-      console.error('ERROR: MONGODB_URI (or MONGO_URI) environment variable is not set');
-      process.exit(1);
+      throw new Error('MONGODB_URI (or MONGO_URI) environment variable is not set');
     }
 
-    const conn = await mongoose.connect(mongoUri, {
+    databaseConnectionPromise = mongoose.connect(mongoUri, {
       serverSelectionTimeoutMS: 5000, // 5 seconds timeout
       socketTimeoutMS: 45000, // 45 seconds timeout
+    }).then((conn) => {
+      console.log('Connected to MongoDB successfully');
+      console.log('Database:', conn.connection.name);
+      return conn.connection;
     });
 
-    console.log('Connected to MongoDB successfully');
-    console.log('Database:', conn.connection.name);
-    
-    return conn;
+    return await databaseConnectionPromise;
   } catch (err) {
+    databaseConnectionPromise = null;
     console.error('MongoDB connection error:', err);
     console.error(
       'Connection string:',
       process.env.MONGODB_URI || process.env.MONGO_URI ? '[HIDDEN]' : 'NOT SET'
     );
-    
-    // Retry connection after 5 seconds
-    console.log('Retrying connection in 5 seconds...');
-    setTimeout(connectDB, 5000);
+
+    throw err;
   }
 };
-
-// Initial connection attempt
-if (process.env.NODE_ENV !== 'test') {
-  connectDB();
-}
 
 // Create default accounts for quick access in local development
 const createDefaultAccounts = async () => {
@@ -316,10 +342,27 @@ const createDefaultAccounts = async () => {
   }
 };
 
-// Call the function after database connection
-if (process.env.NODE_ENV !== 'test') {
-  mongoose.connection.once('open', () => {
-    createDefaultAccounts();
+let appReadyPromise = Promise.resolve();
+
+if (!isTestEnvironment) {
+  appReadyPromise = connectDB()
+    .then(async () => {
+      if (shouldSeedDefaultAccounts) {
+        await createDefaultAccounts();
+      }
+    })
+    .catch((error) => {
+      console.error('Backend bootstrap error:', error);
+      throw error;
+    });
+
+  app.use(async (req, res, next) => {
+    try {
+      await appReadyPromise;
+      next();
+    } catch (error) {
+      next(error);
+    }
   });
 }
 
@@ -349,6 +392,15 @@ app.get('/api/health', (req, res) => {
     status: 'OK',
     message: 'College Placement Backend API is running',
     timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'College Placement Backend API',
+    docs: '/api-docs',
+    health: '/api/health'
   });
 });
 

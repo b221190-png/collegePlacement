@@ -22,14 +22,9 @@ import {
 } from '../services';
 import { CompanyOnboarding } from '../types';
 import { handleApiError } from '../utils/api';
+import { API_ORIGIN } from '../utils/apiConfig';
 
 type Tab = 'overview' | 'companies' | 'students' | 'applications' | 'offcampus';
-
-const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-const NORMALIZED_API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '');
-const API_ORIGIN = NORMALIZED_API_BASE_URL.endsWith('/api')
-  ? NORMALIZED_API_BASE_URL.slice(0, -4)
-  : NORMALIZED_API_BASE_URL;
 
 interface ApiCompany {
   _id: string;
