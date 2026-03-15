@@ -141,6 +141,35 @@ describe('Company Routes', () => {
       expect(response.body.data.company.name).toBe('New Company');
     });
 
+    it('should create and link a recruiter when recruiter details are provided', async () => {
+      const companyData = {
+        name: 'Recruiter Linked Company',
+        description: 'Recruiter-enabled company',
+        industry: 'Software Development',
+        location: 'Remote',
+        packageOffered: '18 LPA',
+        totalPositions: 6,
+        applicationDeadline: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
+        recruiterName: 'New Recruiter',
+        recruiterEmail: 'new.recruiter@test.com'
+      };
+
+      const response = await request(app)
+        .post('/api/companies')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(companyData)
+        .expect(201);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.recruiter.email).toBe('new.recruiter@test.com');
+      expect(response.body.data.temporaryPassword).toBe('recruiter123');
+
+      const recruiter = await User.findOne({ email: 'new.recruiter@test.com' });
+      expect(recruiter).toBeTruthy();
+      expect(recruiter.role).toBe('recruiter');
+      expect(recruiter.companyId.toString()).toBe(response.body.data.company._id);
+    });
+
     it('should return error for duplicate company name', async () => {
       const companyData = {
         name: 'Test Company', // Same name
@@ -255,7 +284,7 @@ describe('Company Routes', () => {
         name: 'Technical Interview',
         description: 'Technical skills assessment',
         scheduledDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        roundNumber: 1,
+        roundNumber: 4,
         duration: '1 hour',
         location: 'Online'
       };
@@ -275,7 +304,7 @@ describe('Company Routes', () => {
         name: 'HR Interview',
         description: 'Final interview round',
         scheduledDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-        roundNumber: 2
+        roundNumber: 5
       };
 
       const response = await request(app)

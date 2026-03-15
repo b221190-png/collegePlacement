@@ -31,14 +31,6 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use('/api/', limiter);
-
 // CORS configuration - accept multiple development ports
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -50,11 +42,16 @@ const allowedOrigins = [
   'http://127.0.0.1:4173',
   process.env.PRODUCTION_FRONTEND_URL || 'https://college-placement-omega.vercel.app'
 ];
+const localhostOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
+
+    if (process.env.NODE_ENV !== 'production' && localhostOriginPattern.test(origin)) {
+      return callback(null, true);
+    }
 
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
@@ -64,6 +61,19 @@ app.use(cors({
   },
   credentials: true
 }));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+const shouldApplyRateLimit =
+  process.env.NODE_ENV === 'production' || process.env.ENABLE_RATE_LIMIT === 'true';
+
+if (shouldApplyRateLimit) {
+  app.use('/api/', limiter);
+}
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -126,12 +136,13 @@ app.get('/api-docs.json', (req, res) => {
 // Database connection with better error handling
 const connectDB = async () => {
   try {
-    if (!process.env.MONGODB_URI) {
-      console.error('ERROR: MONGODB_URI environment variable is not set');
+    const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+    if (!mongoUri) {
+      console.error('ERROR: MONGODB_URI (or MONGO_URI) environment variable is not set');
       process.exit(1);
     }
 
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
+    const conn = await mongoose.connect(mongoUri, {
       serverSelectionTimeoutMS: 5000, // 5 seconds timeout
       socketTimeoutMS: 45000, // 45 seconds timeout
     });
@@ -142,7 +153,10 @@ const connectDB = async () => {
     return conn;
   } catch (err) {
     console.error('MongoDB connection error:', err);
-    console.error('Connection string:', process.env.MONGODB_URI ? '[HIDDEN]' : 'NOT SET');
+    console.error(
+      'Connection string:',
+      process.env.MONGODB_URI || process.env.MONGO_URI ? '[HIDDEN]' : 'NOT SET'
+    );
     
     // Retry connection after 5 seconds
     console.log('Retrying connection in 5 seconds...');
@@ -151,39 +165,163 @@ const connectDB = async () => {
 };
 
 // Initial connection attempt
-connectDB();
+if (process.env.NODE_ENV !== 'test') {
+  connectDB();
+}
 
-// Create default admin user if not exists
-const createDefaultAdmin = async () => {
+// Create default accounts for quick access in local development
+const createDefaultAccounts = async () => {
   try {
     const User = require('./models/User');
-    const bcrypt = require('bcryptjs');
-    
-    const existingAdmin = await User.findOne({ email: 'admin@collegeplacement.com' });
-    
+    const Student = require('./models/Student');
+    const Company = require('./models/Company');
+    const ApplicationWindow = require('./models/ApplicationWindow');
+
+    let existingAdmin = await User.findOne({ email: 'admin@collegeplacement.com' });
+
     if (!existingAdmin) {
-      const defaultAdmin = new User({
+      existingAdmin = new User({
         name: 'System Administrator',
         email: 'admin@collegeplacement.com',
         password: 'admin123',
         role: 'admin',
         isActive: true
       });
-      
-      await defaultAdmin.save();
+      await existingAdmin.save();
       console.log('Default admin user created successfully');
+    }
+
+    let defaultCompany = await Company.findOne({ name: 'Google' });
+    if (!defaultCompany) {
+      const applicationDeadline = new Date();
+      applicationDeadline.setDate(applicationDeadline.getDate() + 45);
+
+      defaultCompany = new Company({
+        name: 'Google',
+        description: 'Technology company hiring campus talent.',
+        industry: 'Information Technology',
+        location: 'Bengaluru',
+        packageOffered: '32 LPA',
+        totalPositions: 20,
+        applicationDeadline,
+        status: 'active',
+        requirements: ['Strong DSA', 'Problem solving', 'CS fundamentals'],
+        skills: ['JavaScript', 'Java', 'Python', 'Data Structures'],
+        createdBy: existingAdmin._id
+      });
+      await defaultCompany.save();
+      console.log('Default company created successfully');
+    }
+
+    let recruiter = await User.findOne({ email: 'recruiter@google.com' });
+    if (!recruiter) {
+      recruiter = new User({
+        name: 'Google Recruiter',
+        email: 'recruiter@google.com',
+        password: 'recruiter123',
+        role: 'recruiter',
+        companyId: defaultCompany._id,
+        isActive: true
+      });
+      await recruiter.save();
+      console.log('Default recruiter account created successfully');
+    } else if (!recruiter.companyId) {
+      recruiter.companyId = defaultCompany._id;
+      recruiter.role = 'recruiter';
+      await recruiter.save();
+    }
+
+    let studentUser = await User.findOne({ email: 'arjun.sharma@college.edu' });
+    if (!studentUser) {
+      studentUser = new User({
+        name: 'Arjun Sharma',
+        email: 'arjun.sharma@college.edu',
+        password: 'student123',
+        role: 'student',
+        isActive: true
+      });
+      await studentUser.save();
+      console.log('Default student user created successfully');
+    }
+
+    const existingStudentProfile = await Student.findOne({ userId: studentUser._id });
+    if (!existingStudentProfile) {
+      const studentProfile = new Student({
+        userId: studentUser._id,
+        rollNumber: '21BCE001',
+        branch: 'Computer Science',
+        cgpa: 8.6,
+        tenthPercentage: 89.4,
+        twelfthPercentage: 91.2,
+        phone: '9876543210',
+        batch: new Date().getFullYear(),
+        skills: ['React', 'Node.js', 'JavaScript'],
+        backlogs: 0
+      });
+      await studentProfile.save();
+      console.log('Default student profile created successfully');
     } else {
-      console.log('Default admin user already exists');
+      const studentProfileUpdates = {};
+
+      if (existingStudentProfile.tenthPercentage === undefined || existingStudentProfile.tenthPercentage === null) {
+        studentProfileUpdates.tenthPercentage = 89.4;
+      }
+
+      if (existingStudentProfile.twelfthPercentage === undefined || existingStudentProfile.twelfthPercentage === null) {
+        studentProfileUpdates.twelfthPercentage = 91.2;
+      }
+
+      if (existingStudentProfile.backlogs === undefined || existingStudentProfile.backlogs === null) {
+        studentProfileUpdates.backlogs = 0;
+      }
+
+      if (Object.keys(studentProfileUpdates).length > 0) {
+        await Student.findByIdAndUpdate(existingStudentProfile._id, studentProfileUpdates, {
+          runValidators: true,
+        });
+      }
+    }
+
+    const activeWindow = await ApplicationWindow.findOne({
+      companyId: defaultCompany._id,
+      isActive: true,
+      startDate: { $lte: new Date() },
+      endDate: { $gte: new Date() }
+    });
+
+    if (!activeWindow) {
+      const windowStartDate = new Date();
+      windowStartDate.setDate(windowStartDate.getDate() - 1);
+
+      const windowEndDate = new Date(defaultCompany.applicationDeadline);
+
+      const applicationWindow = new ApplicationWindow({
+        companyId: defaultCompany._id,
+        startDate: windowStartDate,
+        endDate: windowEndDate,
+        startTime: '00:00',
+        endTime: '23:59',
+        minCGPA: 0,
+        maxBacklogs: 0,
+        eligibleBranches: ['Computer Science', 'Information Technology'],
+        createdBy: existingAdmin._id,
+        description: 'Default application window for the seeded company.'
+      });
+
+      await applicationWindow.save();
+      console.log('Default application window created successfully');
     }
   } catch (error) {
-    console.error('Error creating default admin:', error);
+    console.error('Error creating default accounts:', error);
   }
 };
 
 // Call the function after database connection
-mongoose.connection.once('open', () => {
-  createDefaultAdmin();
-});
+if (process.env.NODE_ENV !== 'test') {
+  mongoose.connection.once('open', () => {
+    createDefaultAccounts();
+  });
+}
 
 // Routes
 app.use('/api/auth', authRoutes);

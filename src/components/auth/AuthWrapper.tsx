@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Building2, Shield, User } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { useAuthStore } from '../../store/authStore';
 import { LoginForm } from './LoginForm';
 import { RegistrationForm } from './RegistrationForm';
 
@@ -16,8 +18,38 @@ const ROLE_CREDENTIALS: Record<Role, { email: string; password: string }> = {
 };
 
 export const AuthWrapper: React.FC<AuthWrapperProps> = ({ onSuccess }) => {
+  const location = useLocation();
+  const authUser = useAuthStore((state) => state.user);
   const [isLogin, setIsLogin] = useState(true);
   const [userRole, setUserRole] = useState<Role | null>(null);
+
+  const searchParams = new URLSearchParams(location.search);
+  const queryMode = searchParams.get('mode');
+  const resetTokenFromQuery = searchParams.get('token') || '';
+  const googleError = searchParams.get('googleError') || '';
+  const initialAuthView: 'login' | 'forgot' | 'reset' | 'force-reset' =
+    authUser?.mustChangePassword
+      ? 'force-reset'
+      : (
+    queryMode === 'forgot'
+      ? 'forgot'
+      : queryMode === 'reset'
+        ? 'reset'
+        : 'login'
+        );
+
+  useEffect(() => {
+    if (authUser?.mustChangePassword) {
+      setUserRole(authUser.role);
+      setIsLogin(true);
+      return;
+    }
+
+    if (initialAuthView !== 'login') {
+      setUserRole((current) => current || 'student');
+      setIsLogin(true);
+    }
+  }, [authUser?.mustChangePassword, authUser?.role, initialAuthView]);
 
   const roleCards = useMemo(
     () => [
@@ -98,13 +130,15 @@ export const AuthWrapper: React.FC<AuthWrapperProps> = ({ onSuccess }) => {
 
             {userRole && (
               <>
-                <button
-                  onClick={() => setUserRole(null)}
-                  className="inline-flex items-center text-sm text-slate-500 hover:text-slate-900 mb-6"
-                >
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Back to roles
-                </button>
+                {!authUser?.mustChangePassword && (
+                  <button
+                    onClick={() => setUserRole(null)}
+                    className="inline-flex items-center text-sm text-slate-500 hover:text-slate-900 mb-6"
+                  >
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Back to roles
+                  </button>
+                )}
 
                 {isLogin ? (
                   <LoginForm
@@ -115,6 +149,9 @@ export const AuthWrapper: React.FC<AuthWrapperProps> = ({ onSuccess }) => {
                     prefillEmail={ROLE_CREDENTIALS[userRole].email}
                     prefillPassword={ROLE_CREDENTIALS[userRole].password}
                     role={userRole}
+                    initialView={initialAuthView}
+                    initialResetToken={resetTokenFromQuery}
+                    initialExternalError={googleError}
                   />
                 ) : (
                   <RegistrationForm

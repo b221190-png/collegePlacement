@@ -186,15 +186,27 @@ applicationSchema.methods.getReviewHistory = async function() {
 
 // Method to check if application can be updated
 applicationSchema.methods.canBeUpdated = function() {
-  return this.status === 'submitted' || this.status === 'under-review';
+  return ['submitted', 'under-review', 'shortlisted'].includes(this.status);
 };
 
 // Static method to get applications by company
-applicationSchema.statics.getByCompany = function(companyId, filters = {}) {
-  const query = { companyId, ...filters };
+applicationSchema.statics.getByCompany = function(companyOrQuery, filters = {}) {
+  let query;
+  if (companyOrQuery && typeof companyOrQuery === 'object' && !Array.isArray(companyOrQuery)) {
+    query = companyOrQuery;
+  } else {
+    query = { companyId: companyOrQuery, ...filters };
+  }
+
   return this.find(query)
-    .populate('studentId', 'rollNumber branch cgpa phone')
-    .populate('userId', 'name email')
+    .populate({
+      path: 'studentId',
+      select: 'rollNumber branch cgpa tenthPercentage twelfthPercentage backlogs phone skills resumeUrl resumeOriginalName userId',
+      populate: {
+        path: 'userId',
+        select: 'name email'
+      }
+    })
     .sort({ submittedAt: -1 });
 };
 

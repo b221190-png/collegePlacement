@@ -1,3 +1,10 @@
+jest.mock('../utils/cloudinary', () => ({
+  isCloudinaryConfigured: jest.fn(() => true),
+  uploadResumeBuffer: jest.fn().mockResolvedValue({
+    secure_url: 'https://res.cloudinary.com/demo/raw/upload/v1/application-resume.pdf'
+  })
+}));
+
 const request = require('supertest');
 const app = require('../server');
 const User = require('../models/User');
@@ -5,6 +12,7 @@ const Student = require('../models/Student');
 const Company = require('../models/Company');
 const Application = require('../models/Application');
 const ApplicationWindow = require('../models/ApplicationWindow');
+const { uploadResumeBuffer } = require('../utils/cloudinary');
 
 describe('Application Routes', () => {
   let adminToken;
@@ -44,8 +52,11 @@ describe('Application Routes', () => {
       rollNumber: 'ST001',
       branch: 'Computer Science',
       cgpa: 8.5,
+      tenthPercentage: 90,
+      twelfthPercentage: 88,
       phone: '9876543210',
       batch: 2024,
+      backlogs: 0,
       skills: ['JavaScript', 'React']
     });
     await testStudent.save();
@@ -210,9 +221,22 @@ describe('Application Routes', () => {
         packageOffered: '12 LPA',
         totalPositions: 5,
         applicationDeadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        createdBy: admin._id
+        createdBy: testCompany.createdBy
       });
       await newCompany.save();
+
+      const newWindow = new ApplicationWindow({
+        companyId: newCompany._id,
+        startDate: new Date(),
+        endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        startTime: '09:00',
+        endTime: '17:00',
+        minCGPA: 7.0,
+        eligibleBranches: ['Computer Science'],
+        passingYear: 2024,
+        createdBy: testCompany.createdBy
+      });
+      await newWindow.save();
 
       const applicationData = {
         companyId: newCompany._id,
@@ -239,6 +263,62 @@ describe('Application Routes', () => {
 
       expect(response.body.success).toBe(true);
       expect(response.body.data.application.companyId).toBe(newCompany._id.toString());
+    });
+
+    it('should upload application resume to Cloudinary when file is attached', async () => {
+      const companyWithUpload = new Company({
+        name: 'Upload Company',
+        description: 'Upload Description',
+        industry: 'Software Development',
+        location: 'Upload Location',
+        packageOffered: '15 LPA',
+        totalPositions: 3,
+        applicationDeadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        createdBy: testCompany.createdBy
+      });
+      await companyWithUpload.save();
+
+      const uploadWindow = new ApplicationWindow({
+        companyId: companyWithUpload._id,
+        startDate: new Date(),
+        endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        startTime: '09:00',
+        endTime: '17:00',
+        minCGPA: 7.0,
+        eligibleBranches: ['Computer Science'],
+        passingYear: 2024,
+        createdBy: testCompany.createdBy
+      });
+      await uploadWindow.save();
+
+      const response = await request(app)
+        .post('/api/applications')
+        .set('Authorization', `Bearer ${studentToken}`)
+        .field('companyId', companyWithUpload._id.toString())
+        .field('formData', JSON.stringify({
+          personalInfo: {
+            name: 'Student User',
+            email: 'student@test.com',
+            phone: '9876543210'
+          },
+          academicInfo: {
+            graduationCGPA: 8.5
+          },
+          skills: ['JavaScript', 'React']
+        }))
+        .attach('resume', Buffer.from('fake-pdf-content'), {
+          filename: 'resume.pdf',
+          contentType: 'application/pdf'
+        })
+        .expect(201);
+
+      expect(response.body.success).toBe(true);
+      expect(uploadResumeBuffer).toHaveBeenCalled();
+      expect(response.body.data.application.resumeUrl).toContain('res.cloudinary.com');
+
+      const refreshedStudent = await Student.findById(testStudent._id);
+      expect(refreshedStudent.resumeUrl).toContain('res.cloudinary.com');
+      expect(refreshedStudent.resumeOriginalName).toBe('resume.pdf');
     });
 
     it('should return error for duplicate application', async () => {
@@ -311,6 +391,29 @@ describe('Application Routes', () => {
 
       expect(response.body.success).toBe(true);
       expect(response.body.data.application.status).toBe('shortlisted');
+    });
+
+    it('should allow shortlisted applications to move to selected', async () => {
+      await request(app)
+        .put(`/api/applications/${testApplication._id}/status`)
+        .set('Authorization', `Bearer ${recruiterToken}`)
+        .send({
+          status: 'shortlisted',
+          notes: 'Move to final decision'
+        })
+        .expect(200);
+
+      const response = await request(app)
+        .put(`/api/applications/${testApplication._id}/status`)
+        .set('Authorization', `Bearer ${recruiterToken}`)
+        .send({
+          status: 'selected',
+          notes: 'Offer approved'
+        })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.application.status).toBe('selected');
     });
 
     it('should return error for student updating status', async () => {
@@ -391,8 +494,11 @@ describe('Application Routes', () => {
         rollNumber: 'ST002',
         branch: 'Computer Science',
         cgpa: 8.0,
+        tenthPercentage: 89,
+        twelfthPercentage: 86,
         phone: '9876543211',
-        batch: 2024
+        batch: 2024,
+        backlogs: 0
       });
       await student2.save();
 
@@ -485,8 +591,11 @@ describe('Application Routes', () => {
         rollNumber: 'ST002',
         branch: 'Computer Science',
         cgpa: 8.0,
+        tenthPercentage: 89,
+        twelfthPercentage: 86,
         phone: '9876543211',
-        batch: 2024
+        batch: 2024,
+        backlogs: 0
       });
       await student2.save();
 

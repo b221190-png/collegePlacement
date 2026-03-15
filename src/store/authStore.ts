@@ -1,12 +1,54 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import {
-  AuthenticatedUser,
-  getPlacementSnapshot,
-  usePlacementStore,
-} from './placementStore';
 
-export interface User extends AuthenticatedUser {}
+const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const NORMALIZED_API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '');
+const API_BASE_URL = NORMALIZED_API_BASE_URL.endsWith('/api')
+  ? NORMALIZED_API_BASE_URL
+  : `${NORMALIZED_API_BASE_URL}/api`;
+
+interface ApiErrorItem {
+  msg?: string;
+  message?: string;
+}
+
+interface ApiResponse<T = unknown> {
+  success?: boolean;
+  message?: string;
+  data?: T;
+  errors?: ApiErrorItem[];
+}
+
+interface AuthPayload {
+  user: User;
+  accessToken: string;
+  refreshToken: string;
+}
+
+interface LoginResult {
+  success: boolean;
+  mustChangePassword?: boolean;
+}
+
+interface ForgotPasswordResult {
+  success: boolean;
+  message?: string;
+  temporaryPassword?: string;
+  previewUrl?: string | null;
+  emailError?: string | null;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'recruiter' | 'student';
+  companyId?: string;
+  isActive: boolean;
+  mustChangePassword?: boolean;
+  lastLogin?: string;
+  profile?: unknown;
+}
 
 export interface AuthState {
   user: User | null;
@@ -17,8 +59,12 @@ export interface AuthState {
 }
 
 export interface AuthActions {
-  login: (email: string, password: string) => Promise<boolean>;
-  register: (userData: any) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  register: (userData: unknown) => Promise<boolean>;
+  forgotPassword: (email: string) => Promise<ForgotPasswordResult>;
+  resetPassword: (token: string, newPassword: string) => Promise<boolean>;
+  changePassword: (newPassword: string, currentPassword?: string) => Promise<boolean>;
+  completeExternalAuth: (payload: AuthPayload) => void;
   logout: () => void;
   refreshAccessToken: () => Promise<void>;
   updateProfile: (profileData: Record<string, unknown>) => Promise<boolean>;
@@ -35,10 +81,65 @@ const syncLegacyTokenStorage = (accessToken: string | null, refreshToken: string
   if (accessToken && refreshToken) {
     localStorage.setItem('accessToken', accessToken);
     localStorage.setItem('refreshToken', refreshToken);
-  } else {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+    return;
   }
+
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+};
+
+const safeJsonParse = async <T>(response: Response): Promise<ApiResponse<T>> => {
+  try {
+    return (await response.json()) as ApiResponse<T>;
+  } catch {
+    return {};
+  }
+};
+
+const extractErrorMessage = (payload: ApiResponse<unknown>, fallback: string) => {
+  if (payload.message) {
+    return payload.message;
+  }
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    return payload.errors
+      .map((error) => error.msg || error.message)
+      .filter(Boolean)
+      .join(', ');
+  }
+  return fallback;
+};
+
+const request = async <T>(path: string, init?: RequestInit) => {
+  const response = await fetch(`${API_BASE_URL}${path}`, init);
+  const payload = await safeJsonParse<T>(response);
+  return { response, payload };
+};
+
+const normalizeSkillsPayload = (value: unknown) => {
+  if (!value) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((skill) => skill.trim())
+      .filter(Boolean);
+  }
+  return value;
+};
+
+const applyAuthPayload = (set: (partial: Partial<AuthStore>) => void, payload: AuthPayload) => {
+  syncLegacyTokenStorage(payload.accessToken, payload.refreshToken);
+  set({
+    user: payload.user,
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
+    isLoading: false,
+    error: null,
+  });
 };
 
 export const useAuthStore = create<AuthStore>()(
@@ -54,24 +155,27 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
 
         try {
-          const payload = usePlacementStore.getState().authenticate(email, password);
-          syncLegacyTokenStorage(payload.accessToken, payload.refreshToken);
-
-          set({
-            user: payload.user,
-            accessToken: payload.accessToken,
-            refreshToken: payload.refreshToken,
-            isLoading: false,
-            error: null,
+          const { response, payload } = await request<AuthPayload>('/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
           });
 
-          return true;
+          if (!response.ok || !payload.data) {
+            throw new Error(extractErrorMessage(payload, 'Login failed'));
+          }
+
+          applyAuthPayload(set, payload.data);
+          return {
+            success: true,
+            mustChangePassword: Boolean(payload.data.user.mustChangePassword),
+          };
         } catch (error) {
           set({
             isLoading: false,
             error: error instanceof Error ? error.message : 'Login failed',
           });
-          return false;
+          return { success: false };
         }
       },
 
@@ -79,17 +183,17 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
 
         try {
-          const payload = usePlacementStore.getState().registerUser(userData);
-          syncLegacyTokenStorage(payload.accessToken, payload.refreshToken);
-
-          set({
-            user: payload.user,
-            accessToken: payload.accessToken,
-            refreshToken: payload.refreshToken,
-            isLoading: false,
-            error: null,
+          const { response, payload } = await request<AuthPayload>('/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userData),
           });
 
+          if (!response.ok || !payload.data) {
+            throw new Error(extractErrorMessage(payload, 'Registration failed'));
+          }
+
+          applyAuthPayload(set, payload.data);
           return true;
         } catch (error) {
           set({
@@ -100,7 +204,124 @@ export const useAuthStore = create<AuthStore>()(
         }
       },
 
+      forgotPassword: async (email) => {
+        set({ isLoading: true, error: null });
+
+        try {
+          const { response, payload } = await request('/auth/forgot-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          });
+
+          if (!response.ok) {
+            throw new Error(extractErrorMessage(payload, 'Unable to process forgot password request'));
+          }
+
+          set({ isLoading: false, error: null });
+          return {
+            success: true,
+            message: payload.message,
+            temporaryPassword:
+              (payload.data as { temporaryPassword?: string } | undefined)?.temporaryPassword,
+            previewUrl:
+              (payload.data as { previewUrl?: string | null } | undefined)?.previewUrl ?? null,
+            emailError:
+              (payload.data as { emailError?: string | null } | undefined)?.emailError ?? null,
+          };
+        } catch (error) {
+          set({
+            isLoading: false,
+            error: error instanceof Error ? error.message : 'Forgot password failed',
+          });
+          return { success: false };
+        }
+      },
+
+      resetPassword: async (token, newPassword) => {
+        set({ isLoading: true, error: null });
+
+        try {
+          const { response, payload } = await request<AuthPayload>('/auth/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, password: newPassword }),
+          });
+
+          if (!response.ok) {
+            throw new Error(extractErrorMessage(payload, 'Unable to reset password'));
+          }
+
+          const data = payload.data;
+          if (data?.accessToken && data?.refreshToken && data.user) {
+            applyAuthPayload(set, data);
+            return true;
+          }
+
+          set({ isLoading: false, error: null });
+          return true;
+        } catch (error) {
+          set({
+            isLoading: false,
+            error: error instanceof Error ? error.message : 'Reset password failed',
+          });
+          return false;
+        }
+      },
+
+      completeExternalAuth: (payload) => {
+        applyAuthPayload(set, payload);
+      },
+
+      changePassword: async (newPassword, currentPassword) => {
+        const { accessToken } = get();
+
+        if (!accessToken) {
+          set({ error: 'No active session found' });
+          return false;
+        }
+
+        try {
+          const { response, payload } = await request<{ user: User }>('/auth/change-password', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ currentPassword, newPassword }),
+          });
+
+          if (!response.ok || !payload.data?.user) {
+            throw new Error(extractErrorMessage(payload, 'Unable to update password'));
+          }
+
+          set((state) => ({
+            user: state.user ? { ...state.user, ...payload.data?.user } : payload.data?.user ?? null,
+            error: null,
+            isLoading: false,
+          }));
+          return true;
+        } catch (error) {
+          set({
+            isLoading: false,
+            error: error instanceof Error ? error.message : 'Change password failed',
+          });
+          return false;
+        }
+      },
+
       logout: () => {
+        const token = get().accessToken;
+        if (token) {
+          void request('/auth/logout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+          }).catch(() => undefined);
+        }
+
         syncLegacyTokenStorage(null, null);
         set({
           user: null,
@@ -112,32 +333,61 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       refreshAccessToken: async () => {
-        const { user, refreshToken } = get();
+        const { refreshToken } = get();
 
-        if (!user || !refreshToken) {
-          set({ error: 'No active session found' });
+        if (!refreshToken) {
+          set({ error: 'No refresh token available' });
           return;
         }
 
-        const accessToken = `mock-access-${user.id}-${Date.now()}`;
-        syncLegacyTokenStorage(accessToken, refreshToken);
-        set({ accessToken, error: null });
+        try {
+          const { response, payload } = await request<{ accessToken: string }>('/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken }),
+          });
+
+          if (!response.ok || !payload.data?.accessToken) {
+            throw new Error(extractErrorMessage(payload, 'Failed to refresh session'));
+          }
+
+          syncLegacyTokenStorage(payload.data.accessToken, refreshToken);
+          set({ accessToken: payload.data.accessToken, error: null });
+        } catch {
+          get().logout();
+          set({ error: 'Session expired. Please log in again.' });
+        }
       },
 
       updateProfile: async (profileData) => {
-        const { user } = get();
+        const { accessToken } = get();
 
-        if (!user) {
-          set({ error: 'You must be logged in to update your profile' });
+        if (!accessToken) {
+          set({ error: 'No active session found' });
           return false;
         }
 
-        try {
-          const updatedUser = usePlacementStore
-            .getState()
-            .updateProfile(user.id, profileData);
+        const payloadToSend: Record<string, unknown> = { ...profileData };
+        payloadToSend.skills = normalizeSkillsPayload(profileData.skills);
 
-          set({ user: updatedUser, error: null });
+        try {
+          const { response, payload } = await request<{ user: Partial<User> }>('/auth/profile', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify(payloadToSend),
+          });
+
+          if (!response.ok || !payload.data?.user) {
+            throw new Error(extractErrorMessage(payload, 'Profile update failed'));
+          }
+
+          set((state) => ({
+            user: state.user ? { ...state.user, ...payload.data?.user } : (payload.data?.user as User),
+            error: null,
+          }));
           return true;
         } catch (error) {
           set({
@@ -152,7 +402,7 @@ export const useAuthStore = create<AuthStore>()(
       },
     }),
     {
-      name: 'mock-auth-store',
+      name: 'auth-store',
       partialize: (state) => ({
         user: state.user,
         accessToken: state.accessToken,
@@ -163,17 +413,15 @@ export const useAuthStore = create<AuthStore>()(
 );
 
 export const initializeAuth = async () => {
-  const authState = useAuthStore.getState();
-  const snapshot = getPlacementSnapshot();
-
-  if (!authState.user) {
-    syncLegacyTokenStorage(null, null);
+  if (typeof window === 'undefined') {
     return;
   }
 
-  const account = snapshot.users.find((user) => user.id === authState.user?.id);
+  const authState = useAuthStore.getState();
+  const storedAccessToken = authState.accessToken || localStorage.getItem('accessToken');
+  const storedRefreshToken = authState.refreshToken || localStorage.getItem('refreshToken');
 
-  if (!account) {
+  if (!storedAccessToken || !storedRefreshToken) {
     syncLegacyTokenStorage(null, null);
     useAuthStore.setState({
       user: null,
@@ -184,17 +432,61 @@ export const initializeAuth = async () => {
     return;
   }
 
-  const syncedUser: User = {
-    id: account.id,
-    name: account.name,
-    email: account.email,
-    role: account.role,
-    companyId: account.companyId,
-    studentId: account.studentId,
-    isActive: account.isActive,
-    lastLogin: account.lastLogin,
+  const fetchProfile = async (token: string) =>
+    request<{ user: User }>('/auth/profile', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+  const hydrateSession = (user: User, accessToken: string, refreshToken: string) => {
+    syncLegacyTokenStorage(accessToken, refreshToken);
+    useAuthStore.setState({
+      user,
+      accessToken,
+      refreshToken,
+      error: null,
+    });
   };
 
-  syncLegacyTokenStorage(authState.accessToken, authState.refreshToken);
-  useAuthStore.setState({ user: syncedUser });
+  try {
+    const profileResult = await fetchProfile(storedAccessToken);
+    if (profileResult.response.ok && profileResult.payload.data?.user) {
+      hydrateSession(profileResult.payload.data.user, storedAccessToken, storedRefreshToken);
+      return;
+    }
+
+    const refreshResult = await request<{ accessToken: string }>('/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: storedRefreshToken }),
+    });
+
+    if (!refreshResult.response.ok || !refreshResult.payload.data?.accessToken) {
+      throw new Error('Unable to refresh access token');
+    }
+
+    const newAccessToken = refreshResult.payload.data.accessToken;
+    const refreshedProfileResult = await fetchProfile(newAccessToken);
+
+    if (!refreshedProfileResult.response.ok || !refreshedProfileResult.payload.data?.user) {
+      throw new Error('Unable to restore profile');
+    }
+
+    hydrateSession(
+      refreshedProfileResult.payload.data.user,
+      newAccessToken,
+      storedRefreshToken
+    );
+  } catch {
+    syncLegacyTokenStorage(null, null);
+    useAuthStore.setState({
+      user: null,
+      accessToken: null,
+      refreshToken: null,
+      error: null,
+    });
+  }
 };

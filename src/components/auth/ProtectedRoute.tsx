@@ -20,6 +20,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/auth" replace />;
   }
 
+  if (requireAuth && user?.mustChangePassword) {
+    return <Navigate to="/auth?mode=force-reset" replace />;
+  }
+
   // If user is logged in but a specific role is required
   if (requiredRole && user && user.role !== requiredRole) {
     // Redirect to appropriate dashboard based on user role
@@ -36,7 +40,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   // If authentication is not required and user is logged in, redirect to their dashboard
-  if (!requireAuth && user) {
+  if (!requireAuth && user && !user.mustChangePassword) {
     switch (user.role) {
       case 'admin':
         return <Navigate to="/admin" replace />;

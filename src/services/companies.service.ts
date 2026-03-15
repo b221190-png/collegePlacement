@@ -1,75 +1,53 @@
-import { getPlacementSnapshot, usePlacementStore } from '../store/placementStore';
+import api from '../utils/api';
 
 export const companiesService = {
-  getCompanies: async (params?: { status?: string; search?: string }) => {
-    const snapshot = getPlacementSnapshot();
-    let companies = snapshot.companies;
-
-    if (params?.status && params.status !== 'all') {
-      companies = companies.filter((company) => company.status === params.status);
-    }
-
-    if (params?.search) {
-      const search = params.search.toLowerCase();
-      companies = companies.filter(
-        (company) =>
-          company.name.toLowerCase().includes(search) ||
-          company.industry.toLowerCase().includes(search)
-      );
-    }
-
-    return { success: true, data: companies };
+  getCompanies: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/companies', { params });
+    return response.data;
   },
 
   getActiveCompanies: async () => {
-    const snapshot = getPlacementSnapshot();
-    return {
-      success: true,
-      data: snapshot.companies.filter((company) => company.status === 'open'),
-    };
+    const response = await api.get('/companies/active');
+    return response.data;
   },
 
   getCompany: async (id: string) => {
-    const snapshot = getPlacementSnapshot();
-    const company = snapshot.companies.find((entry) => entry.id === id);
-    return { success: Boolean(company), data: company };
+    const response = await api.get(`/companies/${id}`);
+    return response.data;
   },
 
-  createCompany: async (companyData: any) => {
-    const result = usePlacementStore.getState().createCompany(companyData);
-    return { success: true, data: result.company, meta: { recruiter: result.recruiter } };
+  createCompany: async (companyData: unknown) => {
+    const response = await api.post('/companies', companyData);
+    return response.data;
   },
 
-  updateCompany: async () => {
-    return { success: false, message: 'Inline company editing is not implemented yet' };
+  updateCompany: async (id: string, companyData: unknown) => {
+    const response = await api.put(`/companies/${id}`, companyData);
+    return response.data;
   },
 
-  deleteCompany: async () => {
-    return { success: false, message: 'Company deletion is not available in demo mode' };
+  deleteCompany: async (id: string) => {
+    const response = await api.delete(`/companies/${id}`);
+    return response.data;
   },
 
-  createRound: async () => {
-    return { success: false, message: 'Round creation is managed inside company onboarding' };
+  createRound: async (id: string, roundData: unknown) => {
+    const response = await api.post(`/companies/${id}/rounds`, roundData);
+    return response.data;
   },
 
   getRounds: async (id: string) => {
-    const snapshot = getPlacementSnapshot();
-    const company = snapshot.companies.find((entry) => entry.id === id);
-    return { success: true, data: company?.rounds || [] };
+    const response = await api.get(`/companies/${id}/rounds`);
+    return response.data;
   },
 
-  searchCompanies: async (params?: { q?: string }) => {
-    return companiesService.getCompanies({ search: params?.q });
+  searchCompanies: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/companies/search', { params });
+    return response.data;
   },
 
   getStats: async () => {
-    const snapshot = getPlacementSnapshot();
-    return {
-      success: true,
-      data: {
-        total: snapshot.companies.length,
-        active: snapshot.companies.filter((company) => company.status === 'open').length,
-      },
-    };
+    const response = await api.get('/companies/stats');
+    return response.data;
   },
 };

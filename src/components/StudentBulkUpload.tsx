@@ -14,6 +14,9 @@ interface StudentUploadRow {
   phone: string;
   branch: string;
   cgpa: number;
+  tenthPercentage?: number;
+  twelfthPercentage?: number;
+  backlogs?: number;
   skills: string[];
   batch?: number;
 }
@@ -34,9 +37,9 @@ const StudentBulkUpload: React.FC<StudentBulkUploadProps> = ({
   const [error, setError] = useState('');
 
   const downloadTemplate = () => {
-    const csvContent = `Name,Roll Number,Email,Phone,Branch,CGPA,Skills,Batch
-John Doe,21BCE001,john.doe@college.edu,+91 98765 43210,Computer Science,8.5,"React,Node.js,Python",2025
-Jane Smith,21BCE002,jane.smith@college.edu,+91 98765 43211,Information Technology,9.2,"Java,Spring Boot,MySQL",2025`;
+    const csvContent = `Name,Roll Number,Email,Phone,Branch,CGPA,10th Percentage,12th Percentage,Backlogs,Skills,Batch
+John Doe,21BCE001,john.doe@college.edu,+91 98765 43210,Computer Science,8.5,88,91,0,"React,Node.js,Python",2025
+Jane Smith,21BCE002,jane.smith@college.edu,+91 98765 43211,Information Technology,9.2,92,89,0,"Java,Spring Boot,MySQL",2025`;
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -96,11 +99,18 @@ Jane Smith,21BCE002,jane.smith@college.edu,+91 98765 43211,Information Technolog
           phone: columns[3],
           branch: columns[4],
           cgpa: Number(columns[5]),
-          skills: columns[6]
+          tenthPercentage: columns[6] ? Number(columns[6]) : undefined,
+          twelfthPercentage: columns[7] ? Number(columns[7]) : undefined,
+          backlogs: columns[8] ? Number(columns[8]) : 0,
+          skills: (columns[9] || columns[6] || '')
             .split(',')
             .map((skill) => skill.trim())
             .filter(Boolean),
-          batch: columns[7] ? Number(columns[7]) : undefined,
+          batch: columns[10]
+            ? Number(columns[10])
+            : columns[7]
+              ? Number(columns[7])
+              : undefined,
         }));
 
       if (parsedRows.length === 0) {
@@ -137,7 +147,7 @@ Jane Smith,21BCE002,jane.smith@college.edu,+91 98765 43211,Information Technolog
           <div>
             <h2 className="text-xl font-semibold text-slate-900">Bulk upload students</h2>
             <p className="text-sm text-slate-500">
-              Import CSV data directly into the locally persisted student list.
+              Import CSV data directly to backend student records.
             </p>
           </div>
         </div>

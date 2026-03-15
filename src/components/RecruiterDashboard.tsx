@@ -3,6 +3,7 @@ import {
   BarChart3,
   CheckCircle2,
   Download,
+  FileText,
   LogOut,
   Search,
   Users,
@@ -13,14 +14,25 @@ import { handleApiError } from '../utils/api';
 
 type Tab = 'applications' | 'analytics';
 
+const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const NORMALIZED_API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '');
+const API_ORIGIN = NORMALIZED_API_BASE_URL.endsWith('/api')
+  ? NORMALIZED_API_BASE_URL.slice(0, -4)
+  : NORMALIZED_API_BASE_URL;
+
 interface ApplicationViewModel {
   id: string;
   studentName: string;
   studentRollNumber: string;
   studentBranch: string;
+  studentCgpa: number | null;
+  studentTenthPercentage: number | null;
+  studentTwelfthPercentage: number | null;
+  studentBacklogs: number;
   skills: string[];
   status: string;
   score: number | null;
+  resumeUrl: string | null;
 }
 
 const RECRUITER_APPLICATION_FETCH_LIMIT = 100;
@@ -53,9 +65,30 @@ const RecruiterDashboard: React.FC = () => {
       studentName: String(application.studentId?.userId?.name || 'Student'),
       studentRollNumber: String(application.studentId?.rollNumber || '-'),
       studentBranch: String(application.studentId?.branch || '-'),
+      studentCgpa:
+        typeof application.studentId?.cgpa === 'number' ? Number(application.studentId.cgpa) : null,
+      studentTenthPercentage:
+        typeof application.studentId?.tenthPercentage === 'number'
+          ? Number(application.studentId.tenthPercentage)
+          : null,
+      studentTwelfthPercentage:
+        typeof application.studentId?.twelfthPercentage === 'number'
+          ? Number(application.studentId.twelfthPercentage)
+          : null,
+      studentBacklogs: Number(application.studentId?.backlogs || 0),
       skills: normalizedSkills,
       status: String(application.status || 'submitted'),
       score: typeof application.score === 'number' ? application.score : null,
+      resumeUrl:
+        application.resumeUrl
+          ? String(application.resumeUrl).startsWith('http')
+            ? String(application.resumeUrl)
+            : `${API_ORIGIN}${String(application.resumeUrl)}`
+          : application.studentId?.resumeUrl
+            ? String(application.studentId.resumeUrl).startsWith('http')
+              ? String(application.studentId.resumeUrl)
+              : `${API_ORIGIN}${String(application.studentId.resumeUrl)}`
+            : null,
     };
   };
 
@@ -373,7 +406,7 @@ const RecruiterDashboard: React.FC = () => {
                           }
                         />
                       </th>
-                      {['Student', 'Branch', 'Skills', 'Score', 'Status'].map((heading) => (
+                      {['Student', 'Academics', 'Skills', 'Resume', 'Score', 'Status'].map((heading) => (
                         <th
                           key={heading}
                           className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500"
@@ -407,6 +440,15 @@ const RecruiterDashboard: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-700">
                           {application.studentBranch}
+                          <div className="text-slate-500 mt-1">
+                            CGPA {typeof application.studentCgpa === 'number' ? application.studentCgpa.toFixed(1) : '--'}
+                          </div>
+                          <div className="text-slate-500">
+                            10th {typeof application.studentTenthPercentage === 'number' ? `${application.studentTenthPercentage.toFixed(1)}%` : 'NA'} · 12th {typeof application.studentTwelfthPercentage === 'number' ? `${application.studentTwelfthPercentage.toFixed(1)}%` : 'NA'}
+                          </div>
+                          <div className="text-slate-500">
+                            Backlogs {application.studentBacklogs}
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-700">
                           <div className="flex flex-wrap gap-2">
@@ -419,6 +461,21 @@ const RecruiterDashboard: React.FC = () => {
                               </span>
                             ))}
                           </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          {application.resumeUrl ? (
+                            <a
+                              href={application.resumeUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                            >
+                              <FileText className="w-4 h-4" />
+                              View resume
+                            </a>
+                          ) : (
+                            <span className="text-slate-400">No resume</span>
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <input

@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
 import AdminDashboard from './components/AdminDashboard';
+import GoogleAuthCallback from './components/auth/GoogleAuthCallback';
 import { AuthWrapper } from './components/auth/AuthWrapper';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import RecruiterDashboard from './components/RecruiterDashboard';
@@ -15,7 +16,11 @@ function App() {
     void initializeAuth();
   }, []);
 
-  const defaultRoute = user ? `/${user.role}` : '/auth';
+  const defaultRoute = user
+    ? user.mustChangePassword
+      ? '/auth?mode=force-reset'
+      : `/${user.role}`
+    : '/auth';
 
   return (
     <Router>
@@ -25,6 +30,14 @@ function App() {
           element={
             <ProtectedRoute requireAuth={false}>
               <AuthWrapper />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/auth/google/callback"
+          element={
+            <ProtectedRoute requireAuth={false}>
+              <GoogleAuthCallback />
             </ProtectedRoute>
           }
         />

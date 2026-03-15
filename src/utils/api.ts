@@ -1,6 +1,10 @@
 import axios, { AxiosError } from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const NORMALIZED_API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '');
+const API_BASE_URL = NORMALIZED_API_BASE_URL.endsWith('/api')
+  ? NORMALIZED_API_BASE_URL
+  : `${NORMALIZED_API_BASE_URL}/api`;
 
 // Create axios instance
 const api = axios.create({
@@ -70,7 +74,9 @@ export const handleApiError = (error: any): string => {
   if (error.response) {
     const message = error.response.data.message || 'An error occurred';
     if (error.response.data.errors) {
-      return error.response.data.errors.join(', ');
+      return error.response.data.errors
+        .map((entry: any) => entry?.msg || entry?.message || entry?.param || String(entry))
+        .join(', ');
     }
     return message;
   } else if (error.request) {

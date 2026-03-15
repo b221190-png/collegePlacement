@@ -1,30 +1,17 @@
 const express = require('express');
 const { body, query, validationResult } = require('express-validator');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const Application = require('../models/Application');
 const Student = require('../models/Student');
 const Company = require('../models/Company');
 const ApplicationReviewHistory = require('../models/ApplicationReviewHistory');
+const { isCloudinaryConfigured, uploadResumeBuffer } = require('../utils/cloudinary');
 const { protect, authorize, studentAccess, companyAccess } = require('../middleware/auth');
 
 const router = express.Router();
 
 // Configure multer for resume uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadPath = process.env.UPLOAD_PATH || './uploads';
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    }
-    cb(null, uploadPath);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'application-resume-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   // Allow resume files (PDF, DOC, DOCX)
@@ -45,7 +32,7 @@ const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB for resumes
+    fileSize: parseInt(process.env.MAX_FILE_SIZE, 10) || 10 * 1024 * 1024 // 10MB for resumes
   }
 });
 
@@ -124,8 +111,14 @@ router.get('/', protect, authorize('admin', 'recruiter'), [
     let applications;
     if (req.user.role === 'admin') {
       applications = await Application.find(query)
-        .populate('studentId', 'rollNumber branch cgpa phone')
-        .populate('userId', 'name email')
+        .populate({
+          path: 'studentId',
+          select: 'rollNumber branch cgpa tenthPercentage twelfthPercentage backlogs phone skills resumeUrl resumeOriginalName userId',
+          populate: {
+            path: 'userId',
+            select: 'name email'
+          }
+        })
         .populate('companyId', 'name logoUrl')
         .populate('roundId', 'name roundNumber')
         .sort({ submittedAt: -1 })
@@ -134,8 +127,14 @@ router.get('/', protect, authorize('admin', 'recruiter'), [
     } else {
       // Recruiter - already filtered by companyId
       applications = await Application.find(query)
-        .populate('studentId', 'rollNumber branch cgpa phone')
-        .populate('userId', 'name email')
+        .populate({
+          path: 'studentId',
+          select: 'rollNumber branch cgpa tenthPercentage twelfthPercentage backlogs phone skills resumeUrl resumeOriginalName userId',
+          populate: {
+            path: 'userId',
+            select: 'name email'
+          }
+        })
         .populate('roundId', 'name roundNumber')
         .sort({ submittedAt: -1 })
         .skip(skip)
@@ -148,8 +147,8 @@ router.get('/', protect, authorize('admin', 'recruiter'), [
         const searchTerm = search.toLowerCase();
         return (
           app.studentId?.rollNumber?.toLowerCase().includes(searchTerm) ||
-          app.userId?.name?.toLowerCase().includes(searchTerm) ||
-          app.userId?.email?.toLowerCase().includes(searchTerm) ||
+          app.studentId?.userId?.name?.toLowerCase().includes(searchTerm) ||
+          app.studentId?.userId?.email?.toLowerCase().includes(searchTerm) ||
           app.studentId?.branch?.toLowerCase().includes(searchTerm)
         );
       });
@@ -182,13 +181,19 @@ router.get('/', protect, authorize('admin', 'recruiter'), [
 // @route   GET /api/applications/:id
 // @desc    Get application by ID
 // @access  Private
-router.get('/:id', protect, async (req, res) => {
+router.get('/:id([0-9a-fA-F]{24})', protect, async (req, res) => {
   try {
     const { id } = req.params;
 
     const application = await Application.findById(id)
-      .populate('studentId', 'rollNumber branch cgpa phone skills resumeUrl')
-      .populate('userId', 'name email')
+      .populate({
+        path: 'studentId',
+        select: 'rollNumber branch cgpa tenthPercentage twelfthPercentage backlogs phone skills resumeUrl resumeOriginalName userId',
+        populate: {
+          path: 'userId',
+          select: 'name email'
+        }
+      })
       .populate('companyId', 'name logoUrl description location packageOffered')
       .populate('roundId', 'name roundNumber description scheduledDate')
       .populate('reviewedBy', 'name email');
@@ -248,8 +253,23 @@ router.post('/', protect, authorize('student'), upload.single('resume'), [
     .isMongoId()
     .withMessage('Invalid company ID'),
   body('formData')
-    .isObject()
-    .withMessage('Form data is required')
+    .custom((value) => {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return true;
+      }
+
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          return parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+        } catch (error) {
+          return false;
+        }
+      }
+
+      return false;
+    })
+    .withMessage('Form data must be a valid object')
 ], async (req, res) => {
   try {
     // Check for validation errors
@@ -263,6 +283,8 @@ router.post('/', protect, authorize('student'), upload.single('resume'), [
     }
 
     const { companyId, formData } = req.body;
+    const parsedFormData =
+      typeof formData === 'string' ? JSON.parse(formData) : formData;
 
     // Get student profile
     const student = await Student.findOne({ userId: req.user._id });
@@ -327,21 +349,62 @@ router.post('/', protect, authorize('student'), upload.single('resume'), [
       });
     }
 
+    let uploadedResumeUrl = student.resumeUrl;
+
+    if (req.file) {
+      if (!isCloudinaryConfigured()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Resume upload is not configured on the server'
+        });
+      }
+
+      try {
+        const uploadResult = await uploadResumeBuffer(req.file, {
+          folder: `${process.env.CLOUDINARY_RESUME_FOLDER || 'college-placement/resumes'}/${student.rollNumber}`,
+          public_id: `company-${companyId}-${Date.now()}`
+        });
+
+        uploadedResumeUrl = uploadResult.secure_url;
+        student.resumeUrl = uploadResult.secure_url;
+        student.resumeOriginalName = req.file.originalname;
+        student.resumeFileSize = req.file.size;
+        await student.save();
+      } catch (uploadError) {
+        console.error('Resume upload error:', uploadError);
+        return res.status(502).json({
+          success: false,
+          message: 'Resume upload failed. Please try again.'
+        });
+      }
+    }
+
+    const mergedFormData = {
+      ...parsedFormData,
+      academicInfo: {
+        ...(parsedFormData?.academicInfo || {}),
+        graduationCGPA:
+          parsedFormData?.academicInfo?.graduationCGPA ?? student.cgpa ?? 0,
+        tenthPercentage:
+          parsedFormData?.academicInfo?.tenthPercentage ?? student.tenthPercentage ?? null,
+        twelfthPercentage:
+          parsedFormData?.academicInfo?.twelfthPercentage ?? student.twelfthPercentage ?? null,
+        currentBacklogs:
+          parsedFormData?.academicInfo?.currentBacklogs ?? student.backlogs ?? 0,
+      },
+    };
+
     // Create application
     const application = new Application({
       studentId: student._id,
       companyId,
-      formData: JSON.parse(formData),
-      resumeUrl: req.file ? `/uploads/${req.file.filename}` : student.resumeUrl
+      formData: mergedFormData,
+      resumeUrl: uploadedResumeUrl
     });
 
     await application.save();
 
     // Populate response data
-    await application.populate([
-      { path: 'companyId', select: 'name logoUrl' }
-    ]);
-
     res.status(201).json({
       success: true,
       message: 'Application submitted successfully',
@@ -359,7 +422,7 @@ router.post('/', protect, authorize('student'), upload.single('resume'), [
 // @route   PUT /api/applications/:id/status
 // @desc    Update application status (recruiter/admin only)
 // @access  Private (Recruiter, Admin)
-router.put('/:id/status', protect, [
+router.put('/:id([0-9a-fA-F]{24})/status', protect, [
   body('status')
     .isIn(['submitted', 'under-review', 'shortlisted', 'rejected', 'selected'])
     .withMessage('Invalid status'),
@@ -417,8 +480,14 @@ router.put('/:id/status', protect, [
 
     // Get updated application with populated data
     const updatedApplication = await Application.findById(id)
-      .populate('studentId', 'rollNumber branch cgpa phone')
-      .populate('userId', 'name email')
+      .populate({
+        path: 'studentId',
+        select: 'rollNumber branch cgpa tenthPercentage twelfthPercentage backlogs phone skills resumeUrl resumeOriginalName userId',
+        populate: {
+          path: 'userId',
+          select: 'name email'
+        }
+      })
       .populate('companyId', 'name logoUrl')
       .populate('roundId', 'name roundNumber');
 
@@ -439,7 +508,7 @@ router.put('/:id/status', protect, [
 // @route   PUT /api/applications/:id/score
 // @desc    Update application score (recruiter/admin only)
 // @access  Private (Recruiter, Admin)
-router.put('/:id/score', protect, [
+router.put('/:id([0-9a-fA-F]{24})/score', protect, [
   body('score')
     .isFloat({ min: 0, max: 100 })
     .withMessage('Score must be between 0 and 100'),
@@ -489,8 +558,14 @@ router.put('/:id/score', protect, [
 
     // Get updated application with populated data
     const updatedApplication = await Application.findById(id)
-      .populate('studentId', 'rollNumber branch cgpa phone')
-      .populate('userId', 'name email')
+      .populate({
+        path: 'studentId',
+        select: 'rollNumber branch cgpa tenthPercentage twelfthPercentage backlogs phone skills resumeUrl resumeOriginalName userId',
+        populate: {
+          path: 'userId',
+          select: 'name email'
+        }
+      })
       .populate('companyId', 'name logoUrl');
 
     res.json({

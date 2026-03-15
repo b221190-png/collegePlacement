@@ -41,8 +41,11 @@ describe('Student Routes', () => {
       rollNumber: 'ST001',
       branch: 'Computer Science',
       cgpa: 8.5,
+      tenthPercentage: 90,
+      twelfthPercentage: 88,
       phone: '9876543210',
       batch: 2024,
+      backlogs: 0,
       skills: ['JavaScript', 'React']
     });
     await testStudent.save();
@@ -121,8 +124,11 @@ describe('Student Routes', () => {
         rollNumber: 'ST002',
         branch: 'Information Technology',
         cgpa: 8.0,
+        tenthPercentage: 89,
+        twelfthPercentage: 86,
         phone: '9876543211',
         batch: 2024,
+        backlogs: 0,
         skills: ['Python', 'Django']
       };
 
@@ -144,8 +150,11 @@ describe('Student Routes', () => {
         rollNumber: 'ST001', // Same roll number
         branch: 'Computer Science',
         cgpa: 8.0,
+        tenthPercentage: 89,
+        twelfthPercentage: 86,
         phone: '9876543212',
-        batch: 2024
+        batch: 2024,
+        backlogs: 0
       };
 
       const response = await request(app)

@@ -1,56 +1,23 @@
-import {
-  getAdminStats,
-  getPlacementSnapshot,
-  getRecruiterStats,
-  getStudentStats,
-} from '../store/placementStore';
+import api from '../utils/api';
 
 export const dashboardService = {
   getAdminDashboard: async () => {
-    const snapshot = getPlacementSnapshot();
-
-    return {
-      success: true,
-      data: {
-        stats: getAdminStats(snapshot),
-      },
-    };
+    const response = await api.get('/dashboard/admin');
+    return response.data;
   },
 
   getRecruiterDashboard: async (companyId: string) => {
-    const snapshot = getPlacementSnapshot();
-
-    return {
-      success: true,
-      data: {
-        stats: getRecruiterStats(snapshot, companyId),
-      },
-    };
+    const response = await api.get(`/dashboard/recruiter/${companyId}`);
+    return response.data;
   },
 
   getStudentDashboard: async (studentId: string) => {
-    const snapshot = getPlacementSnapshot();
-
-    return {
-      success: true,
-      data: {
-        stats: getStudentStats(snapshot, studentId),
-      },
-    };
+    const response = await api.get(`/dashboard/student/${studentId}`);
+    return response.data;
   },
 
-  getOverallAnalytics: async () => {
-    const snapshot = getPlacementSnapshot();
-    const adminStats = getAdminStats(snapshot);
-
-    return {
-      success: true,
-      data: {
-        ...adminStats,
-        placedStudents: snapshot.applications.filter(
-          (application) => application.status === 'selected'
-        ).length,
-      },
-    };
+  getOverallAnalytics: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/dashboard/analytics/overall', { params });
+    return response.data;
   },
 };

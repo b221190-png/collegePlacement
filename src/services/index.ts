@@ -1,357 +1,392 @@
-import {
-  getApplicationsForCompany,
-  getPlacementSnapshot,
-  usePlacementStore,
-} from '../store/placementStore';
-export { dashboardService } from './dashboard.service';
-export { companiesService } from './companies.service';
+import api from '../utils/api';
 
+interface FrontendApplicationFormPayload {
+  studentName?: string;
+  email?: string;
+  phone?: string;
+  cgpa?: number;
+  skills?: string;
+  experience?: string;
+  whyCompany?: string;
+  resume?: File | null;
+}
+
+interface SubmitApplicationPayload {
+  companyId: string;
+  formData: FrontendApplicationFormPayload;
+}
+
+const mapApplicationPayload = (formData: FrontendApplicationFormPayload) => {
+  const parsedSkills =
+    typeof formData.skills === 'string'
+      ? formData.skills
+          .split(',')
+          .map((skill) => skill.trim())
+          .filter(Boolean)
+      : [];
+
+  const additionalInfo = [formData.experience, formData.whyCompany]
+    .filter(Boolean)
+    .join('\n\n');
+
+  return {
+    personalInfo: {
+      name: formData.studentName || '',
+      email: formData.email || '',
+      phone: formData.phone || '',
+      address: '',
+    },
+    academicInfo: {
+      graduationCGPA: Number(formData.cgpa || 0),
+      currentBacklogs: 0,
+    },
+    skills: parsedSkills,
+    projectDetails: [],
+    experienceDetails: [],
+    achievements: [],
+    additionalInfo,
+  };
+};
+
+// ============================================================================
+// STUDENTS SERVICE
+// ============================================================================
 export const studentsService = {
-  getStudents: async (params?: { email?: string; rollNumber?: string }) => {
-    const snapshot = getPlacementSnapshot();
-    let students = snapshot.students;
-
-    if (params?.email) {
-      students = students.filter((student) => student.email === params.email);
-    }
-
-    if (params?.rollNumber) {
-      students = students.filter(
-        (student) => student.rollNumber === params.rollNumber
-      );
-    }
-
-    return { success: true, data: students };
+  getStudents: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/students', { params });
+    return response.data;
   },
 
   getStudent: async (id: string) => {
-    const snapshot = getPlacementSnapshot();
-    return {
-      success: true,
-      data: snapshot.students.find((student) => student.id === id) || null,
-    };
+    const response = await api.get(`/students/${id}`);
+    return response.data;
   },
 
-  createStudent: async () => {
-    return {
-      success: false,
-      message: 'Use registration or bulk upload to create students in demo mode',
-    };
+  createStudent: async (studentData: Record<string, unknown>) => {
+    const response = await api.post('/students', studentData);
+    return response.data;
   },
 
-  updateStudent: async () => {
-    return { success: false, message: 'Student editing is handled through profile updates' };
+  updateStudent: async (id: string, studentData: Record<string, unknown>) => {
+    const response = await api.put(`/students/${id}`, studentData);
+    return response.data;
   },
 
-  deleteStudent: async () => {
-    return { success: false, message: 'Student deletion is disabled in demo mode' };
+  deleteStudent: async (id: string) => {
+    const response = await api.delete(`/students/${id}`);
+    return response.data;
   },
 
   uploadResume: async (id: string, formData: FormData) => {
-    const resumeName = formData.get('resume') instanceof File
-      ? (formData.get('resume') as File).name
-      : String(formData.get('resumeName') || '');
-    const student = getPlacementSnapshot().students.find((entry) => entry.id === id);
-
-    if (!student?.linkedUserId) {
-      return { success: false, message: 'Student not found' };
-    }
-
-    const updatedUser = usePlacementStore
-      .getState()
-      .updateProfile(student.linkedUserId, { resumeName });
-
-    return { success: true, data: updatedUser };
-  },
-
-  getEligibleStudents: async (companyId: string) => {
-    const snapshot = getPlacementSnapshot();
-    const company = snapshot.companies.find((entry) => entry.id === companyId);
-
-    if (!company?.applicationWindow) {
-      return { success: true, data: snapshot.students };
-    }
-
-    const eligible = snapshot.students.filter((student) => {
-      const meetsCgpa =
-        company.applicationWindow?.minCGPA === undefined ||
-        student.cgpa >= company.applicationWindow.minCGPA;
-      const meetsBranch =
-        company.applicationWindow.branches.length === 0 ||
-        company.applicationWindow.branches.includes(student.branch);
-      return meetsCgpa && meetsBranch;
+    const response = await api.post(`/students/${id}/upload-resume`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
-
-    return { success: true, data: eligible };
+    return response.data;
   },
 
-  bulkUpload: async () => {
-    return {
-      success: false,
-      message: 'Use the bulk upload UI to import students in demo mode',
-    };
+  getEligibleStudents: async (companyId: string, params?: Record<string, unknown>) => {
+    const response = await api.get(`/students/eligible/${companyId}`, { params });
+    return response.data;
+  },
+
+  bulkUpload: async (formData: FormData) => {
+    const response = await api.post('/students/bulk-upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
   },
 };
 
+// ============================================================================
+// APPLICATIONS SERVICE
+// ============================================================================
 export const applicationsService = {
-  getApplications: async (params?: { studentId?: string; companyId?: string }) => {
-    const snapshot = getPlacementSnapshot();
-    let applications = snapshot.applications;
-
-    if (params?.studentId) {
-      applications = applications.filter(
-        (application) => application.studentId === params.studentId
-      );
-    }
-
-    if (params?.companyId) {
-      applications = applications.filter(
-        (application) => application.companyId === params.companyId
-      );
-    }
-
-    return { success: true, data: applications };
+  getApplications: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/applications', { params });
+    return response.data;
   },
 
   getApplication: async (id: string) => {
-    const snapshot = getPlacementSnapshot();
-    return {
-      success: true,
-      data: snapshot.applications.find((application) => application.id === id) || null,
-    };
+    const response = await api.get(`/applications/${id}`);
+    return response.data;
   },
 
-  submitApplication: async (applicationData: any) => {
-    const application = usePlacementStore.getState().submitApplication(applicationData);
-    return { success: true, data: application };
+  submitApplication: async (applicationData: SubmitApplicationPayload) => {
+    const payload = new FormData();
+    payload.append('companyId', applicationData.companyId);
+    payload.append('formData', JSON.stringify(mapApplicationPayload(applicationData.formData)));
+    if (applicationData.formData.resume instanceof File) {
+      payload.append('resume', applicationData.formData.resume);
+    }
+
+    const response = await api.post('/applications', payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
   },
 
-  updateApplicationStatus: async (id: string, statusData: { status: any }) => {
-    const application = usePlacementStore
-      .getState()
-      .updateApplicationStatus(id, statusData.status);
-    return { success: true, data: application };
+  updateApplicationStatus: async (id: string, statusData: Record<string, unknown>) => {
+    const response = await api.put(`/applications/${id}/status`, statusData);
+    return response.data;
   },
 
-  updateApplicationScore: async (id: string, scoreData: { score: number }) => {
-    const application = usePlacementStore
-      .getState()
-      .updateApplicationScore(id, Number(scoreData.score));
-    return { success: true, data: application };
+  updateApplicationScore: async (id: string, scoreData: Record<string, unknown>) => {
+    const response = await api.put(`/applications/${id}/score`, scoreData);
+    return response.data;
   },
 
-  bulkUpdateApplications: async (updateData: { applicationIds: string[]; status: any }) => {
-    const applications = usePlacementStore
-      .getState()
-      .bulkUpdateApplications(updateData.applicationIds, updateData.status);
-    return { success: true, data: applications };
+  bulkUpdateApplications: async (updateData: Record<string, unknown>) => {
+    const response = await api.post('/applications/bulk-update', updateData);
+    return response.data;
   },
 
-  getStudentApplications: async (studentId: string) => {
-    const snapshot = getPlacementSnapshot();
-    const applications = snapshot.applications
-      .filter((application) => application.studentId === studentId)
-      .map((application) => ({
-        ...application,
-        company:
-          snapshot.companies.find((company) => company.id === application.companyId) ||
-          null,
-      }));
-
-    return { success: true, data: applications };
+  getStudentApplications: async (studentId: string, params?: Record<string, unknown>) => {
+    const response = await api.get(`/applications/student/${studentId}`, { params });
+    return response.data;
   },
 
-  getCompanyApplications: async (companyId: string) => {
-    return {
-      success: true,
-      data: getApplicationsForCompany(getPlacementSnapshot(), companyId),
-    };
+  getCompanyApplications: async (companyId: string, params?: Record<string, unknown>) => {
+    const response = await api.get(`/applications/company/${companyId}`, { params });
+    return response.data;
   },
 
   getStats: async () => {
-    const snapshot = getPlacementSnapshot();
-    return {
-      success: true,
-      data: {
-        total: snapshot.applications.length,
-      },
-    };
+    const response = await api.get('/applications/stats');
+    return response.data;
   },
 };
 
+// ============================================================================
+// APPLICATION WINDOWS SERVICE
+// ============================================================================
 export const applicationWindowsService = {
-  getWindows: async () => {
-    const snapshot = getPlacementSnapshot();
-    return {
-      success: true,
-      data: snapshot.companies
-        .filter((company) => company.applicationWindow)
-        .map((company) => ({
-          companyId: company.id,
-          companyName: company.name,
-          ...company.applicationWindow,
-        })),
-    };
+  getWindows: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/application-windows', { params });
+    return response.data;
   },
 
   getActiveWindows: async () => {
-    const snapshot = getPlacementSnapshot();
-    return {
-      success: true,
-      data: snapshot.companies.filter((company) => company.status === 'open'),
-    };
+    const response = await api.get('/application-windows/active');
+    return response.data;
   },
 
   getUpcomingWindows: async () => {
-    return { success: true, data: [] };
+    const response = await api.get('/application-windows/upcoming');
+    return response.data;
   },
 
   getWindow: async (id: string) => {
-    const snapshot = getPlacementSnapshot();
-    const company = snapshot.companies.find((entry) => entry.id === id);
-    return { success: true, data: company?.applicationWindow || null };
+    const response = await api.get(`/application-windows/${id}`);
+    return response.data;
   },
 
-  createWindow: async (windowData: any) => {
-    const company = usePlacementStore
-      .getState()
-      .configureApplicationWindow(windowData);
-    return { success: true, data: company };
+  createWindow: async (windowData: Record<string, unknown>) => {
+    const response = await api.post('/application-windows', windowData);
+    return response.data;
   },
 
-  updateWindow: async (id: string, windowData: any) => {
-    return applicationWindowsService.createWindow({ ...windowData, companyId: id });
+  updateWindow: async (id: string, windowData: Record<string, unknown>) => {
+    const response = await api.put(`/application-windows/${id}`, windowData);
+    return response.data;
   },
 
-  deleteWindow: async () => {
-    return { success: false, message: 'Deleting windows is disabled in demo mode' };
+  deleteWindow: async (id: string) => {
+    const response = await api.delete(`/application-windows/${id}`);
+    return response.data;
   },
 
-  deactivateWindow: async () => {
-    return { success: false, message: 'Deactivation is not implemented in demo mode' };
+  deactivateWindow: async (id: string) => {
+    const response = await api.post(`/application-windows/${id}/deactivate`);
+    return response.data;
   },
 };
 
+// ============================================================================
+// OFF-CAMPUS OPPORTUNITIES SERVICE
+// ============================================================================
 export const offCampusService = {
-  getOpportunities: async () => {
-    return {
-      success: true,
-      data: getPlacementSnapshot().offCampusOpportunities,
-    };
+  getOpportunities: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/off-campus-opportunities', { params });
+    return response.data;
   },
 
   getFeaturedOpportunities: async () => {
-    return {
-      success: true,
-      data: getPlacementSnapshot().offCampusOpportunities.slice(0, 4),
-    };
+    const response = await api.get('/off-campus-opportunities/featured');
+    return response.data;
   },
 
   getOpportunity: async (id: string) => {
-    const snapshot = getPlacementSnapshot();
-    return {
-      success: true,
-      data:
-        snapshot.offCampusOpportunities.find((opportunity) => opportunity.id === id) ||
-        null,
-    };
+    const response = await api.get(`/off-campus-opportunities/${id}`);
+    return response.data;
   },
 
-  createOpportunity: async (opportunityData: any) => {
-    const opportunity = usePlacementStore
-      .getState()
-      .createOffCampusOpportunity(opportunityData);
-    return { success: true, data: opportunity };
+  createOpportunity: async (opportunityData: Record<string, unknown>) => {
+    const response = await api.post('/off-campus-opportunities', opportunityData);
+    return response.data;
   },
 
-  updateOpportunity: async () => {
-    return { success: false, message: 'Editing opportunities is not implemented yet' };
+  updateOpportunity: async (id: string, opportunityData: Record<string, unknown>) => {
+    const response = await api.put(`/off-campus-opportunities/${id}`, opportunityData);
+    return response.data;
   },
 
-  deleteOpportunity: async () => {
-    return { success: false, message: 'Deleting opportunities is disabled in demo mode' };
+  deleteOpportunity: async (id: string) => {
+    const response = await api.delete(`/off-campus-opportunities/${id}`);
+    return response.data;
   },
 
-  trackApplication: async () => {
-    return { success: true };
+  trackApplication: async (id: string) => {
+    try {
+      const response = await api.post(`/off-campus-opportunities/${id}/track-application`);
+      return response.data;
+    } catch {
+      return { success: true };
+    }
   },
 
-  searchOpportunities: async () => {
-    return offCampusService.getOpportunities();
+  searchOpportunities: async (params?: Record<string, unknown>) => {
+    try {
+      const response = await api.get('/off-campus-opportunities/search', { params });
+      return response.data;
+    } catch {
+      return offCampusService.getOpportunities(params);
+    }
   },
 
-  getOpportunitiesBySkills: async () => {
-    return offCampusService.getOpportunities();
+  getOpportunitiesBySkills: async (skills: string[]) => {
+    try {
+      const response = await api.get('/off-campus-opportunities/by-skills', {
+        params: { skills: skills.join(',') },
+      });
+      return response.data;
+    } catch {
+      return offCampusService.getOpportunities({ skills: skills.join(',') });
+    }
   },
 
   getMyOpportunities: async () => {
-    return offCampusService.getOpportunities();
+    try {
+      const response = await api.get('/off-campus-opportunities/my-opportunities');
+      return response.data;
+    } catch {
+      return offCampusService.getOpportunities();
+    }
   },
 };
 
+// ============================================================================
+// USERS SERVICE
+// ============================================================================
 export const usersService = {
-  getUsers: async () => ({ success: true, data: getPlacementSnapshot().users }),
-  getUser: async (id: string) => ({
-    success: true,
-    data: getPlacementSnapshot().users.find((user) => user.id === id) || null,
-  }),
-  updateUser: async () => ({ success: false, message: 'Use auth profile updates in demo mode' }),
-  deleteUser: async () => ({ success: false, message: 'Deleting users is disabled in demo mode' }),
-  deactivateUser: async () => ({ success: false, message: 'User deactivation is disabled in demo mode' }),
-  activateUser: async () => ({ success: false, message: 'User activation is disabled in demo mode' }),
-  getStats: async () => ({
-    success: true,
-    data: {
-      total: getPlacementSnapshot().users.length,
-    },
-  }),
-};
+  getUsers: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/users', { params });
+    return response.data;
+  },
 
-export const reportsService = {
-  getApplicationReport: async () => ({
-    success: true,
-    data: getPlacementSnapshot().applications,
-  }),
-  getStudentReport: async () => ({
-    success: true,
-    data: getPlacementSnapshot().students,
-  }),
-  getPlacementReport: async () => ({
-    success: true,
-    data: {
-      applications: getPlacementSnapshot().applications.length,
-      students: getPlacementSnapshot().students.length,
-      companies: getPlacementSnapshot().companies.length,
-    },
-  }),
-};
+  getUser: async (id: string) => {
+    const response = await api.get(`/users/${id}`);
+    return response.data;
+  },
 
-export const searchService = {
-  globalSearch: async (query: string) => {
-    const snapshot = getPlacementSnapshot();
-    const lower = query.toLowerCase();
+  updateUser: async (id: string, userData: Record<string, unknown>) => {
+    const response = await api.put(`/users/${id}`, userData);
+    return response.data;
+  },
 
-    return {
-      success: true,
-      data: {
-        companies: snapshot.companies.filter((company) =>
-          company.name.toLowerCase().includes(lower)
-        ),
-        students: snapshot.students.filter((student) =>
-          student.name.toLowerCase().includes(lower)
-        ),
-      },
-    };
+  deleteUser: async (id: string) => {
+    const response = await api.delete(`/users/${id}`);
+    return response.data;
+  },
+
+  deactivateUser: async (id: string) => {
+    const response = await api.post(`/users/${id}/deactivate`);
+    return response.data;
+  },
+
+  activateUser: async (id: string) => {
+    const response = await api.post(`/users/${id}/activate`);
+    return response.data;
+  },
+
+  getStats: async () => {
+    const response = await api.get('/users/stats');
+    return response.data;
   },
 };
 
-export const uploadsService = {
-  uploadFile: async () => ({
-    success: false,
-    message: 'File uploads are handled inline in demo mode',
-  }),
+// ============================================================================
+// REPORTS SERVICE
+// ============================================================================
+export const reportsService = {
+  getApplicationReport: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/reports/applications', { params });
+    return response.data;
+  },
+
+  getStudentReport: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/reports/students', { params });
+    return response.data;
+  },
+
+  getPlacementReport: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/reports/placements', { params });
+    return response.data;
+  },
+
+  getCompanyPerformance: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/reports/company-performance', { params });
+    return response.data;
+  },
 };
 
-export const notificationsService = {
-  getNotifications: async () => ({ success: true, data: [] }),
+// ============================================================================
+// SEARCH SERVICE
+// ============================================================================
+export const searchService = {
+  globalSearch: async (query: string, params?: Record<string, unknown>) => {
+    const response = await api.get('/search/global', {
+      params: { query, ...params },
+    });
+    return response.data;
+  },
+
+  getSuggestions: async (query: string) => {
+    const response = await api.get('/search/suggestions', {
+      params: { query },
+    });
+    return response.data;
+  },
+
+  advancedSearch: async (filters: Record<string, unknown>) => {
+    const response = await api.get('/search/advanced', {
+      params: filters,
+    });
+    return response.data;
+  },
 };
+
+// ============================================================================
+// UPLOADS SERVICE
+// ============================================================================
+export const uploadsService = {
+  uploadFile: async (formData: FormData) => {
+    const response = await api.post('/uploads/single', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+};
+
+// ============================================================================
+// NOTIFICATIONS SERVICE
+// ============================================================================
+export const notificationsService = {
+  getNotifications: async (params?: Record<string, unknown>) => {
+    const response = await api.get('/notifications', { params });
+    return response.data;
+  },
+};
+
+// Re-export services created in separate files
+export { dashboardService } from './dashboard.service';
+export { companiesService } from './companies.service';

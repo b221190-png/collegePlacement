@@ -11,6 +11,9 @@ interface RegistrationFormData {
   rollNumber: string;
   branch: string;
   cgpa: string;
+  tenthPercentage: string;
+  twelfthPercentage: string;
+  backlogs: string;
   phone: string;
   batch: string;
   skills: string;
@@ -33,6 +36,16 @@ const BRANCHES = [
   'Biotechnology',
 ];
 
+const hasAtMostTwoDecimals = (value: string) => {
+  const [, decimalPart = ''] = value.split('.');
+  return decimalPart.length <= 2;
+};
+
+const isValidNumberInRange = (value: string, min: number, max: number) => {
+  const parsedValue = Number(value);
+  return value.trim() !== '' && !Number.isNaN(parsedValue) && parsedValue >= min && parsedValue <= max;
+};
+
 export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   onSuccess,
   onClose,
@@ -49,6 +62,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     rollNumber: '',
     branch: '',
     cgpa: '',
+    tenthPercentage: '',
+    twelfthPercentage: '',
+    backlogs: '0',
     phone: '',
     batch: '',
     skills: '',
@@ -69,7 +85,32 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     if (formData.role === 'student') {
       if (!formData.rollNumber.trim()) nextErrors.rollNumber = 'Roll number is required';
       if (!formData.branch) nextErrors.branch = 'Branch is required';
-      if (!formData.cgpa) nextErrors.cgpa = 'CGPA is required';
+      if (!formData.cgpa.trim()) {
+        nextErrors.cgpa = 'CGPA is required';
+      } else if (!isValidNumberInRange(formData.cgpa, 0, 10)) {
+        nextErrors.cgpa = 'CGPA must be between 0 and 10';
+      } else if (!hasAtMostTwoDecimals(formData.cgpa)) {
+        nextErrors.cgpa = 'CGPA can have at most 2 decimal places';
+      }
+
+      if (!formData.tenthPercentage.trim()) {
+        nextErrors.tenthPercentage = '10th percentage is required';
+      } else if (!isValidNumberInRange(formData.tenthPercentage, 0, 100)) {
+        nextErrors.tenthPercentage = '10th percentage must be between 0 and 100';
+      }
+
+      if (!formData.twelfthPercentage.trim()) {
+        nextErrors.twelfthPercentage = '12th percentage is required';
+      } else if (!isValidNumberInRange(formData.twelfthPercentage, 0, 100)) {
+        nextErrors.twelfthPercentage = '12th percentage must be between 0 and 100';
+      }
+
+      if (formData.backlogs.trim() === '') {
+        nextErrors.backlogs = 'Backlogs are required';
+      } else if (!Number.isInteger(Number(formData.backlogs)) || Number(formData.backlogs) < 0) {
+        nextErrors.backlogs = 'Backlogs must be a non-negative whole number';
+      }
+
       if (!formData.phone.trim()) nextErrors.phone = 'Phone number is required';
       if (!formData.batch.trim()) nextErrors.batch = 'Batch year is required';
     }
@@ -98,6 +139,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
         rollNumber: formData.rollNumber.trim().toUpperCase(),
         branch: formData.branch,
         cgpa: Number(formData.cgpa),
+        tenthPercentage: Number(formData.tenthPercentage),
+        twelfthPercentage: Number(formData.twelfthPercentage),
+        backlogs: Number(formData.backlogs || 0),
         phone: formData.phone.trim(),
         batch: Number(formData.batch),
         skills: formData.skills
@@ -129,7 +173,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">Create student account</h2>
           <p className="text-sm text-slate-600">
-            New accounts are stored locally and become available across refreshes.
+            Create your student account to access placement opportunities.
           </p>
         </div>
       </div>
@@ -227,6 +271,39 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
                 value={formData.cgpa}
                 onChange={(value) => updateField('cgpa', value)}
                 error={errors.cgpa}
+                min="0"
+                max="10"
+                step="0.01"
+                helper="Enter a value from 0 to 10 with up to 2 decimals"
+              />
+              <Field
+                label="10th percentage"
+                type="number"
+                value={formData.tenthPercentage}
+                onChange={(value) => updateField('tenthPercentage', value)}
+                error={errors.tenthPercentage}
+                min="0"
+                max="100"
+                step="0.01"
+              />
+              <Field
+                label="12th percentage"
+                type="number"
+                value={formData.twelfthPercentage}
+                onChange={(value) => updateField('twelfthPercentage', value)}
+                error={errors.twelfthPercentage}
+                min="0"
+                max="100"
+                step="0.01"
+              />
+              <Field
+                label="Current backlogs"
+                type="number"
+                value={formData.backlogs}
+                onChange={(value) => updateField('backlogs', value)}
+                error={errors.backlogs}
+                min="0"
+                step="1"
               />
               <Field
                 label="Phone"
@@ -279,6 +356,9 @@ interface FieldProps {
   error?: string;
   helper?: string;
   type?: string;
+  min?: string;
+  max?: string;
+  step?: string;
 }
 
 const Field: React.FC<FieldProps> = ({
@@ -288,6 +368,9 @@ const Field: React.FC<FieldProps> = ({
   error,
   helper,
   type = 'text',
+  min,
+  max,
+  step,
 }) => (
   <div>
     <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
@@ -295,6 +378,9 @@ const Field: React.FC<FieldProps> = ({
       type={type}
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      min={min}
+      max={max}
+      step={step}
       className={`w-full rounded-2xl border px-4 py-3 outline-none transition-colors ${
         error ? 'border-red-300 focus:border-red-500' : 'border-slate-200 focus:border-slate-900'
       }`}

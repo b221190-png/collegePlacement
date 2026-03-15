@@ -31,11 +31,17 @@ const BRANCHES = [
   'Biotechnology',
 ];
 
+const toDateInputValue = (date: Date) => {
+  const next = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return next.toISOString().slice(0, 10);
+};
+
 const ApplicationWindow: React.FC<ApplicationWindowProps> = ({
   onClose,
   companies,
   onSubmit,
 }) => {
+  const minimumStartDate = toDateInputValue(new Date());
   const [selectedCompany, setSelectedCompany] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -120,10 +126,24 @@ const ApplicationWindow: React.FC<ApplicationWindowProps> = ({
         </div>
 
         <div className="grid md:grid-cols-2 gap-4">
-          <Field label="Start date" type="date" value={startDate} onChange={setStartDate} />
-          <Field label="End date" type="date" value={endDate} onChange={setEndDate} />
-          <Field label="Start time" type="time" value={startTime} onChange={setStartTime} />
-          <Field label="End time" type="time" value={endTime} onChange={setEndTime} />
+          <Field
+            label="Start date"
+            type="date"
+            value={startDate}
+            onChange={setStartDate}
+            min={minimumStartDate}
+            required
+          />
+          <Field
+            label="End date"
+            type="date"
+            value={endDate}
+            onChange={setEndDate}
+            min={startDate || minimumStartDate}
+            required
+          />
+          <Field label="Start time" type="time" value={startTime} onChange={setStartTime} required />
+          <Field label="End time" type="time" value={endTime} onChange={setEndTime} required />
           <Field label="Minimum CGPA" type="number" value={minCGPA} onChange={setMinCGPA} />
           <Field label="Maximum backlogs" type="number" value={maxBacklogs} onChange={setMaxBacklogs} />
         </div>
@@ -186,6 +206,8 @@ interface FieldProps {
   value: string;
   onChange: (value: string) => void;
   type?: string;
+  min?: string;
+  required?: boolean;
 }
 
 const Field: React.FC<FieldProps> = ({
@@ -193,6 +215,8 @@ const Field: React.FC<FieldProps> = ({
   value,
   onChange,
   type = 'text',
+  min,
+  required = false,
 }) => (
   <div>
     <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
@@ -200,6 +224,8 @@ const Field: React.FC<FieldProps> = ({
       type={type}
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      min={min}
+      required={required}
       className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
     />
   </div>

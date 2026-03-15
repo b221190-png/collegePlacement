@@ -25,6 +25,12 @@ import { handleApiError } from '../utils/api';
 
 type Tab = 'overview' | 'companies' | 'students' | 'applications' | 'offcampus';
 
+const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const NORMALIZED_API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '');
+const API_ORIGIN = NORMALIZED_API_BASE_URL.endsWith('/api')
+  ? NORMALIZED_API_BASE_URL.slice(0, -4)
+  : NORMALIZED_API_BASE_URL;
+
 interface ApiCompany {
   _id: string;
   name: string;
@@ -43,6 +49,12 @@ interface ApiCompany {
     name?: string;
     email?: string;
   } | null;
+  eligibilityCriteria?: {
+    minCGPA?: number;
+    minTenthPercentage?: number;
+    minTwelfthPercentage?: number;
+    backlogCriteria?: 'na' | 'allowed' | 'not-allowed';
+  };
 }
 
 interface ApiStudent {
@@ -50,6 +62,10 @@ interface ApiStudent {
   rollNumber: string;
   branch: string;
   cgpa: number;
+  tenthPercentage?: number | null;
+  twelfthPercentage?: number | null;
+  backlogs?: number;
+  resumeUrl?: string | null;
   batch: number;
   skills?: string[];
   userId?: {
@@ -62,12 +78,20 @@ interface ApiApplication {
   _id: string;
   status: string;
   score?: number | null;
+  resumeUrl?: string | null;
   submittedAt: string;
   studentId?: {
     _id?: string;
     rollNumber?: string;
+    branch?: string;
+    cgpa?: number;
+    tenthPercentage?: number | null;
+    twelfthPercentage?: number | null;
+    backlogs?: number;
+    resumeUrl?: string | null;
     userId?: {
       name?: string;
+      email?: string;
     };
   };
   companyId?: {
@@ -100,6 +124,12 @@ interface CompanyViewModel {
   requirements: string[];
   recruiterName: string;
   recruiterEmail: string;
+  eligibilityCriteria: {
+    minCGPA?: number;
+    minTenthPercentage?: number;
+    minTwelfthPercentage?: number;
+    backlogCriteria: 'na' | 'allowed' | 'not-allowed';
+  };
 }
 
 interface StudentViewModel {
@@ -109,6 +139,10 @@ interface StudentViewModel {
   rollNumber: string;
   branch: string;
   cgpa: number;
+  tenthPercentage: number | null;
+  twelfthPercentage: number | null;
+  backlogs: number;
+  resumeUrl?: string | null;
   batch: number;
   skills: string[];
 }
@@ -118,11 +152,18 @@ interface ApplicationViewModel {
   studentId: string;
   companyId: string;
   studentName: string;
+  studentEmail: string;
   studentRollNumber: string;
+  studentBranch: string;
+  studentCgpa: number | null;
+  studentTenthPercentage: number | null;
+  studentTwelfthPercentage: number | null;
+  studentBacklogs: number;
   companyName: string;
   status: string;
   score: number | null;
   submittedAt: string;
+  resumeUrl: string | null;
 }
 
 interface OffCampusViewModel {
@@ -184,6 +225,20 @@ const normalizeBranch = (value: string) => {
   return 'Other';
 };
 
+const toAssetUrl = (value?: string | null) => {
+  if (!value) {
+    return null;
+  }
+
+  return value.startsWith('http') ? value : `${API_ORIGIN}${value}`;
+};
+
+const formatScoreValue = (value: number | null) =>
+  typeof value === 'number' ? value.toFixed(1) : '--';
+
+const formatPercentageValue = (value: number | null) =>
+  typeof value === 'number' ? `${value.toFixed(1)}%` : 'NA';
+
 const mapCompany = (company: ApiCompany): CompanyViewModel => ({
   id: company._id,
   name: company.name,
@@ -196,6 +251,12 @@ const mapCompany = (company: ApiCompany): CompanyViewModel => ({
   requirements: company.requirements || [],
   recruiterName: company.recruiter?.name || 'Not assigned',
   recruiterEmail: company.recruiter?.email || company.contactEmail || 'Not provided',
+  eligibilityCriteria: {
+    minCGPA: company.eligibilityCriteria?.minCGPA,
+    minTenthPercentage: company.eligibilityCriteria?.minTenthPercentage,
+    minTwelfthPercentage: company.eligibilityCriteria?.minTwelfthPercentage,
+    backlogCriteria: company.eligibilityCriteria?.backlogCriteria || 'na',
+  },
 });
 
 const mapStudent = (student: ApiStudent): StudentViewModel => ({
@@ -205,6 +266,12 @@ const mapStudent = (student: ApiStudent): StudentViewModel => ({
   rollNumber: student.rollNumber,
   branch: student.branch,
   cgpa: Number(student.cgpa || 0),
+  tenthPercentage:
+    typeof student.tenthPercentage === 'number' ? Number(student.tenthPercentage) : null,
+  twelfthPercentage:
+    typeof student.twelfthPercentage === 'number' ? Number(student.twelfthPercentage) : null,
+  backlogs: Number(student.backlogs || 0),
+  resumeUrl: toAssetUrl(student.resumeUrl),
   batch: Number(student.batch || 0),
   skills: student.skills || [],
 });
@@ -214,11 +281,25 @@ const mapApplication = (application: ApiApplication): ApplicationViewModel => ({
   studentId: application.studentId?._id || '',
   companyId: application.companyId?._id || '',
   studentName: application.studentId?.userId?.name || 'Student',
+  studentEmail: application.studentId?.userId?.email || '-',
   studentRollNumber: application.studentId?.rollNumber || '-',
+  studentBranch: application.studentId?.branch || '-',
+  studentCgpa:
+    typeof application.studentId?.cgpa === 'number' ? Number(application.studentId.cgpa) : null,
+  studentTenthPercentage:
+    typeof application.studentId?.tenthPercentage === 'number'
+      ? Number(application.studentId.tenthPercentage)
+      : null,
+  studentTwelfthPercentage:
+    typeof application.studentId?.twelfthPercentage === 'number'
+      ? Number(application.studentId.twelfthPercentage)
+      : null,
+  studentBacklogs: Number(application.studentId?.backlogs || 0),
   companyName: application.companyId?.name || '-',
   status: application.status,
   score: typeof application.score === 'number' ? application.score : null,
   submittedAt: application.submittedAt,
+  resumeUrl: toAssetUrl(application.resumeUrl || application.studentId?.resumeUrl),
 });
 
 const mapOffCampus = (opportunity: ApiOffCampus): OffCampusViewModel => ({
@@ -244,6 +325,7 @@ const AdminDashboard: React.FC = () => {
   const [showWindowForm, setShowWindowForm] = useState(false);
   const [showOpportunityForm, setShowOpportunityForm] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
+  const [selectedApplicationCompanyId, setSelectedApplicationCompanyId] = useState<'all' | string>('all');
 
   const [companies, setCompanies] = useState<CompanyViewModel[]>([]);
   const [students, setStudents] = useState<StudentViewModel[]>([]);
@@ -279,6 +361,23 @@ const AdminDashboard: React.FC = () => {
       pendingApplications,
     };
   }, [applications, companies, students]);
+
+  const applicationsByCompany = useMemo(
+    () =>
+      companies.map((company) => ({
+        company,
+        applicationCount: applications.filter((application) => application.companyId === company.id).length,
+      })),
+    [applications, companies]
+  );
+
+  const visibleApplications = useMemo(() => {
+    if (selectedApplicationCompanyId === 'all') {
+      return applications;
+    }
+
+    return applications.filter((application) => application.companyId === selectedApplicationCompanyId);
+  }, [applications, selectedApplicationCompanyId]);
 
   const loadCompanies = async () => {
     const response = await companiesService.getCompanies({ limit: DASHBOARD_FETCH_LIMIT });
@@ -322,7 +421,19 @@ const AdminDashboard: React.FC = () => {
   }, []);
 
   const handleExportStudents = () => {
-    const header = ['Name', 'Roll Number', 'Email', 'Phone', 'Branch', 'CGPA', 'Batch', 'Skills'];
+    const header = [
+      'Name',
+      'Roll Number',
+      'Email',
+      'Phone',
+      'Branch',
+      'CGPA',
+      '10th Percentage',
+      '12th Percentage',
+      'Backlogs',
+      'Batch',
+      'Skills',
+    ];
     const rows = students.map((student) => [
       student.name,
       student.rollNumber,
@@ -330,6 +441,9 @@ const AdminDashboard: React.FC = () => {
       '-',
       student.branch,
       String(student.cgpa),
+      student.tenthPercentage ?? '',
+      student.twelfthPercentage ?? '',
+      String(student.backlogs),
       String(student.batch),
       student.skills.join(' | '),
     ]);
@@ -365,6 +479,18 @@ const AdminDashboard: React.FC = () => {
             description: round.description,
             duration: 'TBD',
           })),
+        eligibilityCriteria: {
+          minCGPA: companyData.eligibilityCriteria.minCGPA
+            ? Number(companyData.eligibilityCriteria.minCGPA)
+            : undefined,
+          minTenthPercentage: companyData.eligibilityCriteria.minTenthPercentage
+            ? Number(companyData.eligibilityCriteria.minTenthPercentage)
+            : undefined,
+          minTwelfthPercentage: companyData.eligibilityCriteria.minTwelfthPercentage
+            ? Number(companyData.eligibilityCriteria.minTwelfthPercentage)
+            : undefined,
+          backlogCriteria: companyData.eligibilityCriteria.backlogCriteria,
+        },
         contactEmail: companyData.recruiterEmail,
         recruiterName: companyData.recruiterName,
         recruiterEmail: companyData.recruiterEmail,
@@ -393,6 +519,9 @@ const AdminDashboard: React.FC = () => {
     phone: string;
     branch: string;
     cgpa: number;
+    tenthPercentage?: number;
+    twelfthPercentage?: number;
+    backlogs?: number;
     skills: string[];
     batch?: number;
   }>) => {
@@ -409,6 +538,11 @@ const AdminDashboard: React.FC = () => {
             rollNumber: row.rollNumber,
             branch: normalizeBranch(row.branch),
             cgpa: Number(row.cgpa),
+            tenthPercentage:
+              row.tenthPercentage !== undefined ? Number(row.tenthPercentage) : undefined,
+            twelfthPercentage:
+              row.twelfthPercentage !== undefined ? Number(row.twelfthPercentage) : undefined,
+            backlogs: row.backlogs !== undefined ? Number(row.backlogs) : 0,
             phone: row.phone,
             batch: Number(row.batch || new Date().getFullYear()),
             skills: row.skills || [],
@@ -721,49 +855,144 @@ const AdminDashboard: React.FC = () => {
         )}
 
         {activeTab === 'applications' && (
-          <div className="rounded-3xl bg-white border border-slate-200 overflow-hidden">
-            <div className="p-6 border-b border-slate-200">
+          <div className="space-y-6">
+            <div>
               <h2 className="text-xl font-semibold text-slate-900">Application ledger</h2>
               <p className="text-sm text-slate-500 mt-1">
-                Monitor all application submissions and review outcomes.
+                Pick a company to review only that company&apos;s application pipeline.
               </p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50">
-                  <tr>
-                    {['Student', 'Company', 'Status', 'Score', 'Submitted'].map((heading) => (
-                      <th
-                        key={heading}
-                        className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500"
-                      >
-                        {heading}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {applications.map((application) => (
-                    <tr key={application.id}>
-                      <td className="px-6 py-4 text-sm">
-                        <div className="font-medium text-slate-900">{application.studentName}</div>
-                        <div className="text-slate-500">{application.studentRollNumber}</div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-700">{application.companyName}</td>
-                      <td className="px-6 py-4 text-sm text-slate-700 capitalize">
-                        {application.status}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-700">
-                        {application.score ?? '--'}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-700">
-                        {new Date(application.submittedAt).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+
+            <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
+              <button
+                type="button"
+                onClick={() => setSelectedApplicationCompanyId('all')}
+                className={`rounded-3xl border p-5 text-left transition-colors ${
+                  selectedApplicationCompanyId === 'all'
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-slate-200 bg-white text-slate-900'
+                }`}
+              >
+                <div className="text-sm uppercase tracking-[0.2em] opacity-70">Applications</div>
+                <div className="text-2xl font-semibold mt-3">All companies</div>
+                <div className="text-sm mt-2 opacity-80">{applications.length} total records</div>
+              </button>
+
+              {applicationsByCompany.map(({ company, applicationCount }) => (
+                <button
+                  key={company.id}
+                  type="button"
+                  onClick={() => setSelectedApplicationCompanyId(company.id)}
+                  className={`rounded-3xl border p-5 text-left transition-colors ${
+                    selectedApplicationCompanyId === company.id
+                      ? 'border-blue-600 bg-blue-50'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-slate-900">{company.name}</div>
+                      <div className="text-sm text-slate-500 mt-1">{company.industry}</div>
+                    </div>
+                    <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+                      {applicationCount}
+                    </span>
+                  </div>
+                  <div className="text-sm text-slate-500 mt-4">
+                    Deadline {new Date(company.applicationDeadline).toLocaleDateString()}
+                  </div>
+                </button>
+              ))}
             </div>
+
+            <div className="rounded-3xl bg-white border border-slate-200 overflow-hidden">
+              <div className="p-6 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold text-slate-900">
+                    {selectedApplicationCompanyId === 'all'
+                      ? 'All applications'
+                      : companies.find((company) => company.id === selectedApplicationCompanyId)?.name || 'Applications'}
+                  </div>
+                  <div className="text-sm text-slate-500 mt-1">
+                    {visibleApplications.length} applications shown
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      {['Student', 'Academics', 'Company', 'Resume', 'Status', 'Score', 'Submitted'].map((heading) => (
+                        <th
+                          key={heading}
+                          className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500"
+                        >
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {visibleApplications.map((application) => (
+                      <tr key={application.id}>
+                        <td className="px-6 py-4 text-sm">
+                          <div className="font-medium text-slate-900">{application.studentName}</div>
+                          <div className="text-slate-500">{application.studentRollNumber}</div>
+                          <div className="text-slate-500">{application.studentEmail}</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700">
+                          <div>{application.studentBranch}</div>
+                          <div className="text-slate-500 mt-1">
+                            CGPA {formatScoreValue(application.studentCgpa)}
+                          </div>
+                          <div className="text-slate-500">
+                            10th {formatPercentageValue(application.studentTenthPercentage)} · 12th {formatPercentageValue(application.studentTwelfthPercentage)}
+                          </div>
+                          <div className="text-slate-500">
+                            Backlogs {application.studentBacklogs}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700">{application.companyName}</td>
+                        <td className="px-6 py-4 text-sm">
+                          {application.resumeUrl ? (
+                            <a
+                              href={application.resumeUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                            >
+                              <FileText className="w-4 h-4" />
+                              View resume
+                            </a>
+                          ) : (
+                            <span className="text-slate-400">No resume</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700 capitalize">
+                          {application.status}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700">
+                          {application.score ?? '--'}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700">
+                          {new Date(application.submittedAt).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {visibleApplications.length === 0 && (
+              <div className="rounded-3xl bg-white border border-slate-200 p-10 text-center">
+                <FileText className="w-10 h-10 text-slate-400 mx-auto" />
+                <div className="text-lg font-semibold text-slate-900 mt-4">
+                  No applications for this company yet
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -980,25 +1209,73 @@ const FeatureCard: React.FC<{
   </div>
 );
 
+const getEligibilitySummary = (criteria: CompanyViewModel['eligibilityCriteria']) => {
+  const items: string[] = [];
+
+  if (typeof criteria.minCGPA === 'number') {
+    items.push(`CGPA ${criteria.minCGPA}+`);
+  }
+  if (typeof criteria.minTenthPercentage === 'number') {
+    items.push(`10th ${criteria.minTenthPercentage}%+`);
+  }
+  if (typeof criteria.minTwelfthPercentage === 'number') {
+    items.push(`12th ${criteria.minTwelfthPercentage}%+`);
+  }
+  if (criteria.backlogCriteria === 'not-allowed') {
+    items.push('No backlogs');
+  } else if (criteria.backlogCriteria === 'allowed') {
+    items.push('Backlogs allowed');
+  }
+
+  return items.length > 0 ? items : ['No fixed criteria'];
+};
+
 const CompanyAdminCard: React.FC<{
   company: CompanyViewModel;
   applicationCount: number;
 }> = ({ company, applicationCount }) => (
-  <div className="rounded-3xl bg-white border border-slate-200 p-5">
+  <div className="rounded-3xl bg-white border border-slate-200 p-5 shadow-sm">
     <div className="flex items-start justify-between gap-3">
       <div>
-        <div className="font-semibold text-slate-900">{company.name}</div>
-        <div className="text-sm text-slate-500 mt-1">{company.industry}</div>
+        <div className="font-semibold text-slate-900 text-lg">{company.name}</div>
+        <div className="text-sm text-slate-500 mt-1">{company.industry} · {company.location}</div>
       </div>
-      <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+      <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700 capitalize">
         {company.status}
       </span>
     </div>
-  <div className="mt-4 space-y-2 text-sm text-slate-600">
+
+    <div className="grid grid-cols-2 gap-3 mt-5 text-sm">
+      <div className="rounded-2xl bg-slate-50 px-4 py-3">
+        <div className="text-slate-400 text-xs uppercase tracking-[0.16em]">Applications</div>
+        <div className="font-semibold text-slate-900 mt-1">{applicationCount}</div>
+      </div>
+      <div className="rounded-2xl bg-slate-50 px-4 py-3">
+        <div className="text-slate-400 text-xs uppercase tracking-[0.16em]">Deadline</div>
+        <div className="font-semibold text-slate-900 mt-1">
+          {new Date(company.applicationDeadline).toLocaleDateString()}
+        </div>
+      </div>
+    </div>
+
+    <div className="mt-5 space-y-2 text-sm text-slate-600">
       <div>Recruiter: {company.recruiterName}</div>
       <div>Contact: {company.recruiterEmail}</div>
-      <div>Applications: {applicationCount}</div>
-      <div>Deadline: {new Date(company.applicationDeadline).toLocaleDateString()}</div>
+      <div>Package: {company.packageOffered}</div>
+    </div>
+
+    <div className="mt-5">
+      <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Eligibility</div>
+      <div className="flex flex-wrap gap-2 mt-3">
+        {getEligibilitySummary(company.eligibilityCriteria).map((item) => (
+          <span
+            key={item}
+            className="text-xs px-3 py-1 rounded-full bg-blue-50 text-blue-700"
+          >
+            {item}
+          </span>
+        ))}
+      </div>
     </div>
   </div>
 );
@@ -1016,6 +1293,12 @@ const StudentCard: React.FC<{ student: StudentViewModel }> = ({ student }) => (
         <div className="text-sm text-slate-600">
           CGPA {student.cgpa.toFixed(1)} · Batch {student.batch}
         </div>
+        <div className="text-sm text-slate-600">
+          10th {formatPercentageValue(student.tenthPercentage)} · 12th {formatPercentageValue(student.twelfthPercentage)}
+        </div>
+        <div className="text-sm text-slate-600">
+          Backlogs {student.backlogs}
+        </div>
       </div>
     </div>
     <div className="flex flex-wrap gap-2 mt-4">
@@ -1025,6 +1308,17 @@ const StudentCard: React.FC<{ student: StudentViewModel }> = ({ student }) => (
         </span>
       ))}
     </div>
+    {student.resumeUrl && (
+      <a
+        href={student.resumeUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-2 mt-4 text-sm text-blue-600 hover:text-blue-700"
+      >
+        <FileText className="w-4 h-4" />
+        View resume
+      </a>
+    )}
   </div>
 );
 

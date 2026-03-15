@@ -3,10 +3,17 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 
 let mongoServer;
 
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret';
+process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'test-refresh-secret';
+process.env.JWT_EXPIRE = process.env.JWT_EXPIRE || '1h';
+process.env.JWT_REFRESH_EXPIRE = process.env.JWT_REFRESH_EXPIRE || '7d';
+
 // Setup test database
 beforeAll(async () => {
   mongoServer = await MongoMemoryServer.create();
   const mongoUri = mongoServer.getUri();
+  process.env.MONGODB_URI = mongoUri;
   await mongoose.connect(mongoUri);
 });
 

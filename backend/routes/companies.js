@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const Company = require('../models/Company');
+const User = require('../models/User');
 const RecruitmentRound = require('../models/RecruitmentRound');
 const Application = require('../models/Application');
 const { protect, authorize, companyAccess } = require('../middleware/auth');
@@ -49,6 +50,91 @@ const upload = multer({
     fileSize: 5 * 1024 * 1024 // 5MB for logos
   }
 });
+
+const DEFAULT_RECRUITER_PASSWORD = process.env.DEFAULT_RECRUITER_PASSWORD || 'recruiter123';
+
+const toOptionalNumber = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const normalizeEligibilityCriteria = (rawCriteria) => {
+  if (!rawCriteria) {
+    return undefined;
+  }
+
+  const criteria =
+    typeof rawCriteria === 'string'
+      ? JSON.parse(rawCriteria)
+      : rawCriteria;
+
+  const normalized = {
+    minCGPA: toOptionalNumber(criteria.minCGPA),
+    minTenthPercentage: toOptionalNumber(criteria.minTenthPercentage),
+    minTwelfthPercentage: toOptionalNumber(criteria.minTwelfthPercentage),
+    backlogCriteria: ['na', 'allowed', 'not-allowed'].includes(criteria.backlogCriteria)
+      ? criteria.backlogCriteria
+      : 'na',
+  };
+
+  if (criteria.maxBacklogs !== undefined) {
+    normalized.maxBacklogs = toOptionalNumber(criteria.maxBacklogs);
+  }
+
+  if (Array.isArray(criteria.eligibleBranches) && criteria.eligibleBranches.length > 0) {
+    normalized.eligibleBranches = criteria.eligibleBranches;
+  }
+
+  if (criteria.passingYear !== undefined && criteria.passingYear !== null && criteria.passingYear !== '') {
+    normalized.passingYear = Number(criteria.passingYear);
+  }
+
+  const hasCriteria = Object.entries(normalized).some(([key, value]) => {
+    if (key === 'backlogCriteria') {
+      return value !== 'na';
+    }
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return value !== undefined;
+  });
+
+  return hasCriteria ? normalized : undefined;
+};
+
+const attachRecruitersToCompanies = async (companies) => {
+  if (companies.length === 0) {
+    return [];
+  }
+
+  const recruiters = await User.find({
+    role: 'recruiter',
+    companyId: { $in: companies.map((company) => company._id) },
+    isActive: true
+  })
+    .select('name email companyId')
+    .lean();
+
+  const recruiterByCompanyId = new Map(
+    recruiters.map((recruiter) => [
+      String(recruiter.companyId),
+      {
+        id: String(recruiter._id),
+        name: recruiter.name,
+        email: recruiter.email
+      }
+    ])
+  );
+
+  return companies.map((company) => ({
+    ...company.toObject(),
+    recruiter: recruiterByCompanyId.get(String(company._id)) || null
+  }));
+};
 
 // @route   GET /api/companies
 // @desc    Get all companies with filters
@@ -139,6 +225,11 @@ router.get('/', [
         };
       })
     );
+    const companiesWithRecruiters = await attachRecruitersToCompanies(companies);
+    const companiesWithStatsAndRecruiters = companiesWithStats.map((company) => ({
+      ...company,
+      recruiter: companiesWithRecruiters.find((entry) => String(entry._id) === String(company._id))?.recruiter || null
+    }));
 
     // Get total count
     const total = await Company.countDocuments(query);
@@ -146,7 +237,7 @@ router.get('/', [
     res.json({
       success: true,
       data: {
-        companies: companiesWithStats,
+        companies: companiesWithStatsAndRecruiters,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -199,7 +290,7 @@ router.get('/active', async (req, res) => {
 // @route   GET /api/companies/:id
 // @desc    Get company by ID
 // @access  Public (with optional auth)
-router.get('/:id', async (req, res) => {
+router.get('/:id([0-9a-fA-F]{24})', async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -246,11 +337,13 @@ router.get('/:id', async (req, res) => {
       }
     }
 
+    const [companyWithRecruiter] = await attachRecruitersToCompanies([company]);
+
     res.json({
       success: true,
       data: {
         company: {
-          ...company.toObject(),
+          ...companyWithRecruiter,
           applicationStats,
           recruitmentRounds,
           isApplicationOpen: company.isApplicationOpen(),
@@ -313,7 +406,33 @@ router.post('/', protect, authorize('admin'), upload.single('logo'), [
   body('skills')
     .optional()
     .isArray()
-    .withMessage('Skills must be an array')
+    .withMessage('Skills must be an array'),
+  body('eligibilityCriteria.minCGPA')
+    .optional()
+    .isFloat({ min: 0, max: 10 })
+    .withMessage('Minimum CGPA must be between 0 and 10'),
+  body('eligibilityCriteria.minTenthPercentage')
+    .optional()
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('Minimum 10th percentage must be between 0 and 100'),
+  body('eligibilityCriteria.minTwelfthPercentage')
+    .optional()
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('Minimum 12th percentage must be between 0 and 100'),
+  body('eligibilityCriteria.backlogCriteria')
+    .optional()
+    .isIn(['na', 'allowed', 'not-allowed'])
+    .withMessage('Invalid backlog criteria'),
+  body('recruiterName')
+    .optional()
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage('Recruiter name cannot exceed 100 characters'),
+  body('recruiterEmail')
+    .optional()
+    .trim()
+    .isEmail()
+    .withMessage('Recruiter email must be valid')
 ], async (req, res) => {
   try {
     // Check for validation errors
@@ -337,12 +456,16 @@ router.post('/', protect, authorize('admin'), upload.single('logo'), [
       requirements = [],
       skills = [],
       jobDescription,
-      eligibilityCriteria,
+      eligibilityCriteria: rawEligibilityCriteria,
       recruitmentProcess = [],
       website,
       contactEmail,
-      contactPhone
+      contactPhone,
+      recruiterName,
+      recruiterEmail
     } = req.body;
+
+    const eligibilityCriteria = normalizeEligibilityCriteria(rawEligibilityCriteria);
 
     // Check if company name already exists
     const existingCompany = await Company.findOne({ name });
@@ -351,6 +474,30 @@ router.post('/', protect, authorize('admin'), upload.single('logo'), [
         success: false,
         message: 'Company with this name already exists'
       });
+    }
+
+    const normalizedRecruiterEmail =
+      typeof recruiterEmail === 'string' && recruiterEmail.trim()
+        ? recruiterEmail.trim().toLowerCase()
+        : null;
+
+    let existingRecruiter = null;
+    if (normalizedRecruiterEmail) {
+      existingRecruiter = await User.findOne({ email: normalizedRecruiterEmail });
+
+      if (existingRecruiter && existingRecruiter.role !== 'recruiter') {
+        return res.status(400).json({
+          success: false,
+          message: 'This email already belongs to a non-recruiter account'
+        });
+      }
+
+      if (existingRecruiter?.companyId) {
+        return res.status(400).json({
+          success: false,
+          message: 'This recruiter is already assigned to another company'
+        });
+      }
     }
 
     // Create company
@@ -368,7 +515,7 @@ router.post('/', protect, authorize('admin'), upload.single('logo'), [
       eligibilityCriteria,
       recruitmentProcess,
       website,
-      contactEmail,
+      contactEmail: contactEmail || normalizedRecruiterEmail,
       contactPhone,
       createdBy: req.user._id
     });
@@ -380,17 +527,59 @@ router.post('/', protect, authorize('admin'), upload.single('logo'), [
 
     await company.save();
 
-    // Create default recruitment rounds
-    await company.createDefaultRounds();
+    let recruiterData = null;
+    let temporaryPassword = null;
+
+    if (normalizedRecruiterEmail) {
+      if (existingRecruiter) {
+        existingRecruiter.companyId = company._id;
+        existingRecruiter.isActive = true;
+        if (recruiterName) {
+          existingRecruiter.name = recruiterName;
+        }
+        await existingRecruiter.save();
+        recruiterData = {
+          id: String(existingRecruiter._id),
+          name: existingRecruiter.name,
+          email: existingRecruiter.email,
+          isNew: false
+        };
+      } else {
+        const recruiter = new User({
+          name: recruiterName || `${name} Recruiter`,
+          email: normalizedRecruiterEmail,
+          password: DEFAULT_RECRUITER_PASSWORD,
+          role: 'recruiter',
+          companyId: company._id,
+          isActive: true,
+          mustChangePassword: true
+        });
+
+        await recruiter.save();
+
+        recruiterData = {
+          id: String(recruiter._id),
+          name: recruiter.name,
+          email: recruiter.email,
+          isNew: true
+        };
+        temporaryPassword = DEFAULT_RECRUITER_PASSWORD;
+      }
+    }
 
     // Get populated company data
     const populatedCompany = await Company.findById(company._id)
       .populate('createdBy', 'name');
+    const [companyWithRecruiter] = await attachRecruitersToCompanies([populatedCompany]);
 
     res.status(201).json({
       success: true,
       message: 'Company created successfully',
-      data: { company: populatedCompany }
+      data: {
+        company: companyWithRecruiter,
+        recruiter: recruiterData,
+        temporaryPassword
+      }
     });
   } catch (error) {
     console.error('Create company error:', error);
@@ -404,7 +593,7 @@ router.post('/', protect, authorize('admin'), upload.single('logo'), [
 // @route   PUT /api/companies/:id
 // @desc    Update company (admin only or company recruiter)
 // @access  Private
-router.put('/:id', protect, companyAccess, upload.single('logo'), [
+router.put('/:id([0-9a-fA-F]{24})', protect, companyAccess, upload.single('logo'), [
   body('name')
     .optional()
     .trim()
@@ -419,7 +608,23 @@ router.put('/:id', protect, companyAccess, upload.single('logo'), [
   body('applicationDeadline')
     .optional()
     .isISO8601()
-    .withMessage('Application deadline must be a valid date')
+    .withMessage('Application deadline must be a valid date'),
+  body('eligibilityCriteria.minCGPA')
+    .optional()
+    .isFloat({ min: 0, max: 10 })
+    .withMessage('Minimum CGPA must be between 0 and 10'),
+  body('eligibilityCriteria.minTenthPercentage')
+    .optional()
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('Minimum 10th percentage must be between 0 and 100'),
+  body('eligibilityCriteria.minTwelfthPercentage')
+    .optional()
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('Minimum 12th percentage must be between 0 and 100'),
+  body('eligibilityCriteria.backlogCriteria')
+    .optional()
+    .isIn(['na', 'allowed', 'not-allowed'])
+    .withMessage('Invalid backlog criteria')
 ], async (req, res) => {
   try {
     // Check for validation errors
@@ -433,7 +638,7 @@ router.put('/:id', protect, companyAccess, upload.single('logo'), [
     }
 
     const { id } = req.params;
-    const updates = req.body;
+    const updates = { ...req.body };
 
     // Find company
     const company = await Company.findById(id);
@@ -463,6 +668,10 @@ router.put('/:id', protect, companyAccess, upload.single('logo'), [
       updates.logoUrl = `/uploads/${req.file.filename}`;
     }
 
+    if (Object.prototype.hasOwnProperty.call(updates, 'eligibilityCriteria')) {
+      updates.eligibilityCriteria = normalizeEligibilityCriteria(updates.eligibilityCriteria);
+    }
+
     // Update company
     const updatedCompany = await Company.findByIdAndUpdate(
       id,
@@ -487,7 +696,7 @@ router.put('/:id', protect, companyAccess, upload.single('logo'), [
 // @route   DELETE /api/companies/:id
 // @desc    Delete company (admin only)
 // @access  Private (Admin only)
-router.delete('/:id', protect, authorize('admin'), async (req, res) => {
+router.delete('/:id([0-9a-fA-F]{24})', protect, authorize('admin'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -524,7 +733,7 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
 // @route   POST /api/companies/:id/rounds
 // @desc    Create recruitment round for company
 // @access  Private (Admin or company recruiter)
-router.post('/:id/rounds', protect, companyAccess, [
+router.post('/:id([0-9a-fA-F]{24})/rounds', protect, companyAccess, [
   body('name')
     .trim()
     .notEmpty()
@@ -630,7 +839,7 @@ router.post('/:id/rounds', protect, companyAccess, [
 // @route   GET /api/companies/:id/rounds
 // @desc    Get recruitment rounds for company
 // @access  Private (Admin or company recruiter)
-router.get('/:id/rounds', protect, companyAccess, async (req, res) => {
+router.get('/:id([0-9a-fA-F]{24})/rounds', protect, companyAccess, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -701,7 +910,11 @@ router.get('/stats', protect, authorize('admin'), async (req, res) => {
         $group: {
           _id: '$industry',
           count: { $sum: 1 },
-          active: { $sum: { $cond: ['$status', 'active', 1, 0] } },
+          active: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'active'] }, 1, 0]
+            }
+          },
           totalPositions: { $sum: '$totalPositions' }
         }
       }

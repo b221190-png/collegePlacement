@@ -58,8 +58,14 @@ router.get('/admin', protect, authorize('admin'), async (req, res) => {
 
     // Get recent applications
     const recentApplications = await Application.find()
-      .populate('studentId', 'rollNumber')
-      .populate('userId', 'name')
+      .populate({
+        path: 'studentId',
+        select: 'rollNumber userId',
+        populate: {
+          path: 'userId',
+          select: 'name'
+        }
+      })
       .populate('companyId', 'name')
       .sort({ submittedAt: -1 })
       .limit(10);
@@ -174,8 +180,14 @@ router.get('/recruiter/:companyId', protect, [
 
     // Get recent applications for this company
     const recentApplications = await Application.getByCompany({ companyId })
-      .populate('studentId', 'rollNumber branch cgpa phone')
-      .populate('userId', 'name email')
+      .populate({
+        path: 'studentId',
+        select: 'rollNumber branch cgpa phone userId',
+        populate: {
+          path: 'userId',
+          select: 'name email'
+        }
+      })
       .sort({ submittedAt: -1 })
       .limit(10);
 

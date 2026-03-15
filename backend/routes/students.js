@@ -12,6 +12,14 @@ const { protect, authorize, studentAccess } = require('../middleware/auth');
 
 const router = express.Router();
 
+const hasRequiredValue = (value) =>
+  value !== undefined && value !== null && String(value).trim() !== '';
+
+const hasAtMostTwoDecimals = (value) => {
+  const [, decimalPart = ''] = String(value).split('.');
+  return decimalPart.length <= 2;
+};
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -237,14 +245,38 @@ router.post('/', protect, authorize('admin'), [
     .isIn(['Computer Science', 'Information Technology', 'Electronics and Communication', 'Electrical Engineering', 'Mechanical Engineering', 'Civil Engineering', 'Chemical Engineering', 'Biotechnology', 'Other'])
     .withMessage('Invalid branch'),
   body('cgpa')
+    .custom(hasRequiredValue)
+    .withMessage('CGPA is required')
+    .bail()
     .isFloat({ min: 0, max: 10 })
-    .withMessage('CGPA must be between 0 and 10'),
+    .withMessage('CGPA must be between 0 and 10')
+    .bail()
+    .custom(hasAtMostTwoDecimals)
+    .withMessage('CGPA can have at most 2 decimal places'),
+  body('tenthPercentage')
+    .custom(hasRequiredValue)
+    .withMessage('10th percentage is required')
+    .bail()
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('10th percentage must be between 0 and 100'),
+  body('twelfthPercentage')
+    .custom(hasRequiredValue)
+    .withMessage('12th percentage is required')
+    .bail()
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('12th percentage must be between 0 and 100'),
   body('phone')
     .matches(/^[0-9]{10}$/)
     .withMessage('Please enter a valid 10-digit phone number'),
   body('batch')
     .isInt({ min: 2000, max: 2030 })
     .withMessage('Batch must be a valid year between 2000 and 2030'),
+  body('backlogs')
+    .custom(hasRequiredValue)
+    .withMessage('Backlogs are required')
+    .bail()
+    .isInt({ min: 0 })
+    .withMessage('Backlogs must be a non-negative number'),
   body('skills')
     .optional()
     .isArray()
@@ -268,6 +300,8 @@ router.post('/', protect, authorize('admin'), [
       rollNumber,
       branch,
       cgpa,
+      tenthPercentage,
+      twelfthPercentage,
       phone,
       batch,
       skills = [],
@@ -297,7 +331,8 @@ router.post('/', protect, authorize('admin'), [
       name,
       email,
       password,
-      role: 'student'
+      role: 'student',
+      mustChangePassword: true
     });
 
     await user.save();
@@ -307,11 +342,13 @@ router.post('/', protect, authorize('admin'), [
       userId: user._id,
       rollNumber: rollNumber.toUpperCase(),
       branch,
-      cgpa,
+      cgpa: Number(cgpa),
+      tenthPercentage: Number(tenthPercentage),
+      twelfthPercentage: Number(twelfthPercentage),
       phone,
       batch,
       skills,
-      backlogs
+      backlogs: Number(backlogs)
     });
 
     await student.save();
@@ -347,11 +384,26 @@ router.put('/:id', protect, [
   body('cgpa')
     .optional()
     .isFloat({ min: 0, max: 10 })
-    .withMessage('CGPA must be between 0 and 10'),
+    .withMessage('CGPA must be between 0 and 10')
+    .bail()
+    .custom(hasAtMostTwoDecimals)
+    .withMessage('CGPA can have at most 2 decimal places'),
+  body('tenthPercentage')
+    .optional()
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('10th percentage must be between 0 and 100'),
+  body('twelfthPercentage')
+    .optional()
+    .isFloat({ min: 0, max: 100 })
+    .withMessage('12th percentage must be between 0 and 100'),
   body('phone')
     .optional()
     .matches(/^[0-9]{10}$/)
     .withMessage('Please enter a valid 10-digit phone number'),
+  body('backlogs')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Backlogs must be a non-negative number'),
   body('skills')
     .optional()
     .isArray()
@@ -374,6 +426,8 @@ router.put('/:id', protect, [
       rollNumber,
       branch,
       cgpa,
+      tenthPercentage,
+      twelfthPercentage,
       phone,
       batch,
       skills,
@@ -410,6 +464,15 @@ router.put('/:id', protect, [
     if (name) userUpdates.name = name;
     if (phone) studentUpdates.phone = phone;
     if (skills) studentUpdates.skills = skills;
+    if (tenthPercentage !== undefined) {
+      studentUpdates.tenthPercentage = Number(tenthPercentage);
+    }
+    if (twelfthPercentage !== undefined) {
+      studentUpdates.twelfthPercentage = Number(twelfthPercentage);
+    }
+    if (backlogs !== undefined) {
+      studentUpdates.backlogs = Number(backlogs);
+    }
 
     // Fields only admins can update
     if (isAdmin) {
@@ -428,9 +491,8 @@ router.put('/:id', protect, [
         studentUpdates.rollNumber = rollNumber.toUpperCase();
       }
       if (branch) studentUpdates.branch = branch;
-      if (cgpa) studentUpdates.cgpa = cgpa;
-      if (batch) studentUpdates.batch = batch;
-      if (backlogs !== undefined) studentUpdates.backlogs = backlogs;
+      if (cgpa !== undefined) studentUpdates.cgpa = cgpa;
+      if (batch !== undefined) studentUpdates.batch = batch;
       if (placed !== undefined) studentUpdates.placed = placed;
       if (placedCompany) studentUpdates.placedCompany = placedCompany;
       if (salaryPackage) studentUpdates.package = salaryPackage;
@@ -528,7 +590,18 @@ router.post('/bulk-upload', protect, authorize('admin'), upload.single('file'), 
       .pipe(csv())
       .on('data', (data) => {
         // Validate required fields
-        if (data.name && data.email && data.rollNumber && data.branch && data.cgpa && data.phone && data.batch) {
+        if (
+          hasRequiredValue(data.name) &&
+          hasRequiredValue(data.email) &&
+          hasRequiredValue(data.rollNumber) &&
+          hasRequiredValue(data.branch) &&
+          hasRequiredValue(data.cgpa) &&
+          hasRequiredValue(data.tenthPercentage) &&
+          hasRequiredValue(data.twelfthPercentage) &&
+          hasRequiredValue(data.backlogs) &&
+          hasRequiredValue(data.phone) &&
+          hasRequiredValue(data.batch)
+        ) {
           results.push({
             name: data.name.trim(),
             email: data.email.trim().toLowerCase(),
@@ -536,10 +609,12 @@ router.post('/bulk-upload', protect, authorize('admin'), upload.single('file'), 
             rollNumber: data.rollNumber.trim().toUpperCase(),
             branch: data.branch.trim(),
             cgpa: parseFloat(data.cgpa),
+            tenthPercentage: parseFloat(data.tenthPercentage),
+            twelfthPercentage: parseFloat(data.twelfthPercentage),
             phone: data.phone.trim(),
             batch: parseInt(data.batch),
             skills: data.skills ? data.skills.split(',').map(s => s.trim()) : [],
-            backlogs: parseInt(data.backlogs) || 0
+            backlogs: parseInt(data.backlogs, 10)
           });
         }
       })
@@ -644,6 +719,14 @@ router.get('/eligible/:companyId', protect, authorize('admin'), async (req, res)
 
     const ApplicationWindow = require('../models/ApplicationWindow');
     const Company = require('../models/Company');
+    const company = await Company.findById(companyId);
+
+    if (!company) {
+      return res.status(404).json({
+        success: false,
+        message: 'Company not found'
+      });
+    }
 
     // Get active application window for the company
     const appWindow = await ApplicationWindow.findOne({
@@ -662,13 +745,37 @@ router.get('/eligible/:companyId', protect, authorize('admin'), async (req, res)
 
     // Build eligibility query
     const query = { placed: false };
+    const companyCriteria = company.eligibilityCriteria || {};
 
-    if (appWindow.minCGPA) {
-      query.cgpa = { $gte: appWindow.minCGPA };
+    const minimumCgpa = Math.max(
+      typeof appWindow.minCGPA === 'number' ? appWindow.minCGPA : 0,
+      typeof companyCriteria.minCGPA === 'number' ? companyCriteria.minCGPA : 0
+    );
+
+    if (minimumCgpa > 0) {
+      query.cgpa = { $gte: minimumCgpa };
     }
 
+    if (typeof companyCriteria.minTenthPercentage === 'number') {
+      query.tenthPercentage = { $gte: companyCriteria.minTenthPercentage };
+    }
+
+    if (typeof companyCriteria.minTwelfthPercentage === 'number') {
+      query.twelfthPercentage = { $gte: companyCriteria.minTwelfthPercentage };
+    }
+
+    const backlogLimit = [];
     if (appWindow.maxBacklogs !== undefined) {
-      query.backlogs = { $lte: appWindow.maxBacklogs };
+      backlogLimit.push(appWindow.maxBacklogs);
+    }
+    if (companyCriteria.backlogCriteria === 'not-allowed') {
+      backlogLimit.push(0);
+    }
+    if (typeof companyCriteria.maxBacklogs === 'number') {
+      backlogLimit.push(companyCriteria.maxBacklogs);
+    }
+    if (backlogLimit.length > 0) {
+      query.backlogs = { $lte: Math.min(...backlogLimit) };
     }
 
     if (appWindow.eligibleBranches && appWindow.eligibleBranches.length > 0) {
@@ -701,8 +808,11 @@ router.get('/eligible/:companyId', protect, authorize('admin'), async (req, res)
           pages: Math.ceil(total / limit)
         },
         eligibilityCriteria: {
-          minCGPA: appWindow.minCGPA,
-          maxBacklogs: appWindow.maxBacklogs,
+          minCGPA: minimumCgpa || undefined,
+          minTenthPercentage: companyCriteria.minTenthPercentage,
+          minTwelfthPercentage: companyCriteria.minTwelfthPercentage,
+          backlogCriteria: companyCriteria.backlogCriteria || 'na',
+          maxBacklogs: query.backlogs?.$lte,
           eligibleBranches: appWindow.eligibleBranches,
           passingYear: appWindow.passingYear,
           totalEligible: eligibleCount

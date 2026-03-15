@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -22,6 +23,11 @@ const userSchema = new mongoose.Schema({
     minlength: [6, 'Password must be at least 6 characters long'],
     select: false
   },
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
   role: {
     type: String,
     enum: ['admin', 'recruiter', 'student'],
@@ -39,8 +45,22 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  mustChangePassword: {
+    type: Boolean,
+    default: false
+  },
   lastLogin: {
     type: Date
+  },
+  resetPasswordToken: {
+    type: String,
+    default: null,
+    select: false
+  },
+  resetPasswordExpires: {
+    type: Date,
+    default: null,
+    select: false
   }
 }, {
   timestamps: true
@@ -85,6 +105,28 @@ userSchema.methods.updateLastLogin = function() {
   return this.save();
 };
 
+// Generate password reset token (stores hashed token, returns plain token)
+userSchema.methods.generatePasswordResetToken = function() {
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const hashedToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+
+  this.resetPasswordToken = hashedToken;
+  this.resetPasswordExpires = Date.now() + 15 * 60 * 1000;
+
+  return resetToken;
+};
+
+// Generate a human-friendly temporary password for first-time access / recovery
+userSchema.methods.generateTemporaryPassword = function() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  const bytes = crypto.randomBytes(12);
+
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+};
+
 // Static method to find by email with password
 userSchema.statics.findByEmailWithPassword = function(email) {
   return this.findOne({ email }).select('+password');
@@ -92,6 +134,7 @@ userSchema.statics.findByEmailWithPassword = function(email) {
 
 // Index for faster queries
 userSchema.index({ email: 1 });
+userSchema.index({ googleId: 1 }, { sparse: true });
 userSchema.index({ role: 1 });
 userSchema.index({ companyId: 1 });
 

@@ -9,34 +9,55 @@ class EmailService {
     this.initializeTransporter();
   }
 
+  hasConfiguredSmtp() {
+    return Boolean(
+      process.env.EMAIL_HOST &&
+      process.env.EMAIL_USER &&
+      process.env.EMAIL_PASS
+    );
+  }
+
+  getFromAddress() {
+    return process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER || 'placements@college.edu';
+  }
+
+  getFromName() {
+    return process.env.EMAIL_FROM_NAME || 'Placement Cell';
+  }
+
   /**
    * Initialize email transporter
    */
   initializeTransporter() {
-    // For development, use ethereal.email or test account
-    if (process.env.NODE_ENV === 'production') {
-      // Production email service (e.g., Gmail, SendGrid, etc.)
+    const port = Number(process.env.EMAIL_PORT || 587);
+    const secure =
+      process.env.EMAIL_SECURE === 'true' ||
+      (process.env.EMAIL_SECURE !== 'false' && port === 465);
+
+    // Prefer configured SMTP credentials in every environment.
+    if (this.hasConfiguredSmtp()) {
       this.transporter = nodemailer.createTransport({
         host: process.env.EMAIL_HOST,
-        port: process.env.EMAIL_PORT || 587,
-        secure: process.env.EMAIL_SECURE === 'true', // true for 465, false for other ports
+        port,
+        secure,
         auth: {
           user: process.env.EMAIL_USER,
           pass: process.env.EMAIL_PASS
         }
       });
-    } else {
-      // Development configuration - using ethereal or test account
-      this.transporter = nodemailer.createTransport({
-        host: 'smtp.ethereal.email',
-        port: 587,
-        secure: false,
-        auth: {
-          user: process.env.ETHEREAL_USER || 'ethereal.user@ethereal.email',
-          pass: process.env.ETHEREAL_PASS || 'ethereal.password'
-        }
-      });
+      return;
     }
+
+    // Fallback for local development when real SMTP is not configured.
+    this.transporter = nodemailer.createTransport({
+      host: 'smtp.ethereal.email',
+      port: 587,
+      secure: false,
+      auth: {
+        user: process.env.ETHEREAL_USER || 'ethereal.user@ethereal.email',
+        pass: process.env.ETHEREAL_PASS || 'ethereal.password'
+      }
+    });
   }
 
   /**
@@ -67,7 +88,7 @@ class EmailService {
         const emailPromises = batch.map(async (student) => {
           try {
             const mailOptions = {
-              from: `"${process.env.EMAIL_FROM_NAME || 'Placement Cell'}" <${process.env.EMAIL_FROM_ADDRESS || 'placements@college.edu'}>`,
+              from: `"${this.getFromName()}" <${this.getFromAddress()}>`,
               to: student.email,
               cc: student.personalEmail ? student.personalEmail : undefined,
               subject: emailOptions.subject || defaultSubject,
@@ -313,6 +334,80 @@ This is an automated message. Please do not reply to this email.
     } catch (error) {
       console.error('Email configuration test failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Send temporary password email for first-time access / recovery
+   * @param {Object} payload
+   * @param {string} payload.name
+   * @param {string} payload.email
+   * @param {string} payload.temporaryPassword
+   * @param {string} payload.role
+   * @returns {Promise<Object>}
+   */
+  async sendTemporaryPasswordEmail({ name, email, temporaryPassword, role }) {
+    try {
+      const frontendBase = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const subject = 'Your temporary placement portal password';
+      const text = `Hello ${name},
+
+You requested access to the College Placement Portal.
+
+Temporary password: ${temporaryPassword}
+
+Role: ${role}
+
+Use this temporary password to sign in at ${frontendBase}/auth.
+After signing in, you will be asked to set a new password before continuing.
+
+If you did not request this, please contact the placement cell immediately.
+`;
+
+      const html = `
+        <div style="font-family:Segoe UI,Tahoma,sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#f8fafc;color:#0f172a">
+          <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;padding:28px">
+            <p style="font-size:14px;letter-spacing:0.14em;text-transform:uppercase;color:#2563eb;margin:0 0 12px">College Placement</p>
+            <h1 style="font-size:26px;line-height:1.2;margin:0 0 12px">Temporary password issued</h1>
+            <p style="font-size:15px;line-height:1.7;color:#475569;margin:0 0 18px">
+              Hello <strong>${name}</strong>, use the temporary password below to sign in to the placement portal.
+            </p>
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px;margin:0 0 18px">
+              <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.12em;color:#1d4ed8;margin-bottom:8px">Temporary Password</div>
+              <div style="font-size:24px;font-weight:700;letter-spacing:0.08em;color:#0f172a">${temporaryPassword}</div>
+            </div>
+            <p style="font-size:14px;line-height:1.7;color:#475569;margin:0 0 12px">
+              Role: <strong>${role}</strong>
+            </p>
+            <p style="font-size:14px;line-height:1.7;color:#475569;margin:0 0 18px">
+              Sign in at <a href="${frontendBase}/auth" style="color:#2563eb">${frontendBase}/auth</a>.
+              The portal will require you to set a new password before you can continue.
+            </p>
+            <p style="font-size:13px;line-height:1.7;color:#64748b;margin:0">
+              If you did not request this, contact the placement cell immediately.
+            </p>
+          </div>
+        </div>
+      `;
+
+      const info = await this.transporter.sendMail({
+        from: `"${this.getFromName()}" <${this.getFromAddress()}>`,
+        to: email,
+        subject,
+        text,
+        html
+      });
+
+      return {
+        success: true,
+        messageId: info.messageId,
+        previewUrl: nodemailer.getTestMessageUrl(info) || null
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 }

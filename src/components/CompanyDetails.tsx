@@ -41,6 +41,31 @@ const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company, onBack }) => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
   };
 
+  const eligibilitySummary = (() => {
+    const criteria = company.eligibilityCriteria;
+    if (!criteria) {
+      return [];
+    }
+
+    const items: string[] = [];
+    if (typeof criteria.minCGPA === 'number') {
+      items.push(`Minimum CGPA ${criteria.minCGPA}`);
+    }
+    if (typeof criteria.minTenthPercentage === 'number') {
+      items.push(`Minimum 10th percentage ${criteria.minTenthPercentage}%`);
+    }
+    if (typeof criteria.minTwelfthPercentage === 'number') {
+      items.push(`Minimum 12th percentage ${criteria.minTwelfthPercentage}%`);
+    }
+    if (criteria.backlogCriteria === 'not-allowed') {
+      items.push('Backlogs are not allowed');
+    } else if (criteria.backlogCriteria === 'allowed') {
+      items.push('Backlogs are allowed');
+    }
+
+    return items;
+  })();
+
   return (
     <div className="max-w-6xl mx-auto p-6">
       <button
@@ -102,6 +127,22 @@ const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company, onBack }) => {
                   </li>
                 ))}
               </ul>
+
+              <div className="mt-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">Eligibility</h3>
+                {eligibilitySummary.length > 0 ? (
+                  <ul className="space-y-2">
+                    {eligibilitySummary.map((item) => (
+                      <li key={item} className="flex items-start space-x-2">
+                        <CheckCircle className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                        <span className="text-gray-700">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-gray-600">No fixed eligibility criteria were published for this drive.</p>
+                )}
+              </div>
             </div>
           </div>
 

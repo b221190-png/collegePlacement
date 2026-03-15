@@ -5,9 +5,19 @@ export interface Student {
   branch: string;
   email: string;
   cgpa: number;
+  tenthPercentage?: number | null;
+  twelfthPercentage?: number | null;
+  backlogs?: number;
   phone: string;
   skills: string[];
   resume?: string;
+}
+
+export interface CompanyEligibilityCriteria {
+  minCGPA?: number;
+  minTenthPercentage?: number;
+  minTwelfthPercentage?: number;
+  backlogCriteria?: 'na' | 'allowed' | 'not-allowed';
 }
 
 export interface Round {
@@ -34,6 +44,8 @@ export interface Company {
   rounds: Round[];
   totalPositions: number;
   applicationLink?: string;
+  createdAt?: string;
+  eligibilityCriteria?: CompanyEligibilityCriteria;
 }
 
 export interface ApplicationForm {
@@ -107,4 +119,10 @@ export interface CompanyOnboarding {
   }[];
   recruiterEmail: string;
   recruiterName: string;
+  eligibilityCriteria: {
+    minCGPA: string;
+    minTenthPercentage: string;
+    minTwelfthPercentage: string;
+    backlogCriteria: 'na' | 'allowed' | 'not-allowed';
+  };
 }

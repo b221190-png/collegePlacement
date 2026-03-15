@@ -1,5 +1,13 @@
 const mongoose = require('mongoose');
 
+const hasMaxTwoDecimals = (value) => {
+  if (value === null || value === undefined) {
+    return true;
+  }
+
+  return Number(value.toFixed(2)) === value;
+};
+
 const studentSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -34,7 +42,23 @@ const studentSchema = new mongoose.Schema({
     type: Number,
     required: [true, 'CGPA is required'],
     min: [0, 'CGPA cannot be less than 0'],
-    max: [10, 'CGPA cannot be more than 10']
+    max: [10, 'CGPA cannot be more than 10'],
+    validate: {
+      validator: hasMaxTwoDecimals,
+      message: 'CGPA can have at most 2 decimal places'
+    }
+  },
+  tenthPercentage: {
+    type: Number,
+    required: [true, '10th percentage is required'],
+    min: [0, '10th percentage cannot be less than 0'],
+    max: [100, '10th percentage cannot be more than 100']
+  },
+  twelfthPercentage: {
+    type: Number,
+    required: [true, '12th percentage is required'],
+    min: [0, '12th percentage cannot be less than 0'],
+    max: [100, '12th percentage cannot be more than 100']
   },
   phone: {
     type: String,
@@ -59,6 +83,7 @@ const studentSchema = new mongoose.Schema({
   },
   backlogs: {
     type: Number,
+    required: [true, 'Backlogs field is required'],
     default: 0,
     min: [0, 'Backlogs cannot be negative']
   },
@@ -91,6 +116,56 @@ studentSchema.methods.checkEligibility = async function(companyId) {
   const Company = mongoose.model('Company');
 
   try {
+    const company = await Company.findById(companyId);
+    if (!company) {
+      return { eligible: false, reason: 'Company not found' };
+    }
+
+    const companyCriteria = company.eligibilityCriteria || {};
+
+    if (
+      typeof companyCriteria.minCGPA === 'number' &&
+      this.cgpa < companyCriteria.minCGPA
+    ) {
+      return {
+        eligible: false,
+        reason: `Minimum CGPA required is ${companyCriteria.minCGPA}`,
+      };
+    }
+
+    if (
+      typeof companyCriteria.minTenthPercentage === 'number' &&
+      (
+        typeof this.tenthPercentage !== 'number' ||
+        this.tenthPercentage < companyCriteria.minTenthPercentage
+      )
+    ) {
+      return {
+        eligible: false,
+        reason: `Minimum 10th percentage required is ${companyCriteria.minTenthPercentage}`,
+      };
+    }
+
+    if (
+      typeof companyCriteria.minTwelfthPercentage === 'number' &&
+      (
+        typeof this.twelfthPercentage !== 'number' ||
+        this.twelfthPercentage < companyCriteria.minTwelfthPercentage
+      )
+    ) {
+      return {
+        eligible: false,
+        reason: `Minimum 12th percentage required is ${companyCriteria.minTwelfthPercentage}`,
+      };
+    }
+
+    if (companyCriteria.backlogCriteria === 'not-allowed' && this.backlogs > 0) {
+      return {
+        eligible: false,
+        reason: 'This company does not allow active backlogs',
+      };
+    }
+
     // Get application window for the company
     const appWindow = await ApplicationWindow.findOne({
       companyId,
@@ -189,7 +264,8 @@ studentSchema.statics.bulkUpload = async function(studentsData) {
         name: studentData.name,
         email: studentData.email,
         password: studentData.password || 'tempPassword123',
-        role: 'student'
+        role: 'student',
+        mustChangePassword: true
       });
 
       await user.save();
@@ -199,10 +275,13 @@ studentSchema.statics.bulkUpload = async function(studentsData) {
         userId: user._id,
         rollNumber: studentData.rollNumber,
         branch: studentData.branch,
-        cgpa: studentData.cgpa,
+        cgpa: Number(studentData.cgpa),
+        tenthPercentage: Number(studentData.tenthPercentage),
+        twelfthPercentage: Number(studentData.twelfthPercentage),
         phone: studentData.phone,
         skills: studentData.skills || [],
-        batch: studentData.batch
+        batch: studentData.batch,
+        backlogs: Number(studentData.backlogs ?? 0)
       });
 
       await student.save();
@@ -224,6 +303,8 @@ studentSchema.index({ userId: 1 });
 studentSchema.index({ rollNumber: 1 }, { unique: true });
 studentSchema.index({ branch: 1 });
 studentSchema.index({ cgpa: 1 });
+studentSchema.index({ tenthPercentage: 1 });
+studentSchema.index({ twelfthPercentage: 1 });
 studentSchema.index({ batch: 1 });
 studentSchema.index({ placed: 1 });
 

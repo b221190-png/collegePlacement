@@ -2,6 +2,25 @@ import React, { useState } from 'react';
 import { Building2, Plus, Trash2, X } from 'lucide-react';
 import { CompanyOnboarding } from '../types';
 
+const INDUSTRY_OPTIONS = [
+  'Information Technology',
+  'Software Development',
+  'Consulting',
+  'Banking and Finance',
+  'Manufacturing',
+  'Healthcare',
+  'Education',
+  'E-commerce',
+  'Telecommunications',
+  'Automotive',
+  'Other',
+];
+
+const toDateTimeLocalValue = (date: Date) => {
+  const next = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return next.toISOString().slice(0, 16);
+};
+
 interface CompanyOnboardingFormProps {
   onClose: () => void;
   onSubmit: (company: CompanyOnboarding) => Promise<void> | void;
@@ -20,6 +39,12 @@ const initialState: CompanyOnboarding = {
   rounds: [{ name: '', description: '', date: '' }],
   recruiterEmail: '',
   recruiterName: '',
+  eligibilityCriteria: {
+    minCGPA: '',
+    minTenthPercentage: '',
+    minTwelfthPercentage: '',
+    backlogCriteria: 'na',
+  },
 };
 
 const CompanyOnboardingForm: React.FC<CompanyOnboardingFormProps> = ({
@@ -28,6 +53,7 @@ const CompanyOnboardingForm: React.FC<CompanyOnboardingFormProps> = ({
 }) => {
   const [formData, setFormData] = useState<CompanyOnboarding>(initialState);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const minimumDeadline = toDateTimeLocalValue(new Date(Date.now() + 60 * 60 * 1000));
 
   const handleChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -54,6 +80,19 @@ const CompanyOnboardingForm: React.FC<CompanyOnboardingFormProps> = ({
       rounds: current.rounds.map((round, currentIndex) =>
         currentIndex === index ? { ...round, [field]: value } : round
       ),
+    }));
+  };
+
+  const updateEligibility = (
+    field: keyof CompanyOnboarding['eligibilityCriteria'],
+    value: string
+  ) => {
+    setFormData((current) => ({
+      ...current,
+      eligibilityCriteria: {
+        ...current.eligibilityCriteria,
+        [field]: value,
+      },
     }));
   };
 
@@ -97,11 +136,35 @@ const CompanyOnboardingForm: React.FC<CompanyOnboardingFormProps> = ({
       <form onSubmit={handleSubmit} className="p-6 space-y-6">
         <div className="grid md:grid-cols-2 gap-4">
           <Field label="Company name" name="name" value={formData.name} onChange={handleChange} required />
-          <Field label="Industry" name="industry" value={formData.industry} onChange={handleChange} required />
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Industry</label>
+            <select
+              name="industry"
+              value={formData.industry}
+              onChange={handleChange}
+              className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+              required
+            >
+              <option value="">Select industry</option>
+              {INDUSTRY_OPTIONS.map((industry) => (
+                <option key={industry} value={industry}>
+                  {industry}
+                </option>
+              ))}
+            </select>
+          </div>
           <Field label="Location" name="location" value={formData.location} onChange={handleChange} required />
           <Field label="Package offered" name="packageOffered" value={formData.packageOffered} onChange={handleChange} required />
           <Field label="Total positions" name="totalPositions" type="number" value={String(formData.totalPositions)} onChange={handleChange} required />
-          <Field label="Application deadline" name="applicationDeadline" type="date" value={formData.applicationDeadline} onChange={handleChange} required />
+          <Field
+            label="Application deadline"
+            name="applicationDeadline"
+            type="datetime-local"
+            value={formData.applicationDeadline}
+            onChange={handleChange}
+            required
+            min={minimumDeadline}
+          />
           <Field label="Recruiter name" name="recruiterName" value={formData.recruiterName} onChange={handleChange} required />
           <Field label="Recruiter email" name="recruiterEmail" type="email" value={formData.recruiterEmail} onChange={handleChange} required />
           <Field label="Logo URL" name="logo" value={formData.logo} onChange={handleChange} />
@@ -118,6 +181,61 @@ const CompanyOnboardingForm: React.FC<CompanyOnboardingFormProps> = ({
             required
           />
         </div>
+
+        <section className="rounded-3xl border border-slate-200 p-5 space-y-4">
+          <div>
+            <h3 className="font-semibold text-slate-900">Eligibility criteria</h3>
+            <p className="text-sm text-slate-500 mt-1">
+              Use NA when a company does not want to enforce a specific criterion.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <Field
+              label="Minimum college CGPA"
+              type="number"
+              value={formData.eligibilityCriteria.minCGPA}
+              onChange={(event) => updateEligibility('minCGPA', event.target.value)}
+              placeholder="NA"
+              step="0.01"
+            />
+            <Field
+              label="Minimum 10th percentage"
+              type="number"
+              value={formData.eligibilityCriteria.minTenthPercentage}
+              onChange={(event) => updateEligibility('minTenthPercentage', event.target.value)}
+              placeholder="NA"
+              step="0.01"
+            />
+            <Field
+              label="Minimum 12th percentage"
+              type="number"
+              value={formData.eligibilityCriteria.minTwelfthPercentage}
+              onChange={(event) => updateEligibility('minTwelfthPercentage', event.target.value)}
+              placeholder="NA"
+              step="0.01"
+            />
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Backlogs
+              </label>
+              <select
+                value={formData.eligibilityCriteria.backlogCriteria}
+                onChange={(event) =>
+                  updateEligibility(
+                    'backlogCriteria',
+                    event.target.value as CompanyOnboarding['eligibilityCriteria']['backlogCriteria']
+                  )
+                }
+                className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
+              >
+                <option value="na">NA</option>
+                <option value="allowed">Allowed</option>
+                <option value="not-allowed">Not allowed</option>
+              </select>
+            </div>
+          </div>
+        </section>
 
         <section className="rounded-3xl border border-slate-200 p-5 space-y-4">
           <div className="flex items-center justify-between">
@@ -262,6 +380,9 @@ interface FieldProps {
   onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   type?: string;
   required?: boolean;
+  min?: string;
+  placeholder?: string;
+  step?: string;
 }
 
 const Field: React.FC<FieldProps> = ({
@@ -271,6 +392,9 @@ const Field: React.FC<FieldProps> = ({
   onChange,
   type = 'text',
   required = false,
+  min,
+  placeholder,
+  step,
 }) => (
   <div>
     <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
@@ -279,6 +403,9 @@ const Field: React.FC<FieldProps> = ({
       type={type}
       value={value}
       onChange={onChange}
+      min={min}
+      placeholder={placeholder}
+      step={step}
       className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-slate-900"
       required={required}
     />

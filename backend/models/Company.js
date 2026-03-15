@@ -75,6 +75,23 @@ const companySchema = new mongoose.Schema({
       min: 0,
       max: 10
     },
+    minTenthPercentage: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null
+    },
+    minTwelfthPercentage: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null
+    },
+    backlogCriteria: {
+      type: String,
+      enum: ['na', 'allowed', 'not-allowed'],
+      default: 'na'
+    },
     maxBacklogs: {
       type: Number,
       min: 0
@@ -166,8 +183,14 @@ companySchema.methods.getApplications = async function(filters = {}) {
   const query = { companyId: this._id, ...filters };
 
   return await Application.find(query)
-    .populate('studentId', 'rollNumber branch cgpa phone')
-    .populate('userId', 'name email')
+    .populate({
+      path: 'studentId',
+      select: 'rollNumber branch cgpa tenthPercentage twelfthPercentage phone skills backlogs resumeUrl resumeOriginalName userId',
+      populate: {
+        path: 'userId',
+        select: 'name email'
+      }
+    })
     .sort({ submittedAt: -1 });
 };
 
